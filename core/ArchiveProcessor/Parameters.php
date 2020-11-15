@@ -221,12 +221,9 @@ class Parameters
         return count($this->getIdSites()) == 1;
     }
 
-    public function logStatusDebug($isTemporary)
+    public function logStatusDebug()
     {
         $temporary = 'definitive archive';
-        if ($isTemporary) {
-            $temporary = 'temporary archive';
-        }
         Log::debug(
             "%s archive, idSite = %d (%s), segment '%s', report = '%s', UTC datetime [%s -> %s]",
             $this->getPeriod()->getLabel(),
@@ -260,5 +257,10 @@ class Parameters
     public function setIsRootArchiveRequest($isRootArchiveRequest)
     {
         $this->isRootArchiveRequest = $isRootArchiveRequest;
+    }
+
+    public function __toString()
+    {
+        return "[idSite = {$this->getSite()->getId()}, period = {$this->getPeriod()->getLabel()} {$this->getPeriod()->getRangeString()}, segment = {$this->getSegment()->getString()}]";
     }
 }

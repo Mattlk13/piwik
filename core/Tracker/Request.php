@@ -20,6 +20,7 @@ use Piwik\Network\IPUtils;
 use Piwik\Piwik;
 use Piwik\Plugins\CustomVariables\CustomVariables;
 use Piwik\Plugins\UsersManager\UsersManager;
+use Piwik\ProxyHttp;
 use Piwik\Tracker;
 use Piwik\Cache as PiwikCache;
 
@@ -502,6 +503,18 @@ class Request
             }
         }
 
+        $cache = Tracker\Cache::getCacheGeneral();
+        if (!empty($cache['delete_logs_enable']) && !empty($cache['delete_logs_older_than'])) {
+            $scheduleInterval = $cache['delete_logs_schedule_lowest_interval'];
+            $maxLogAge = $cache['delete_logs_older_than'];
+            $logEntryCutoff = time() - (($maxLogAge + $scheduleInterval) * 60*60*24);
+            if ($cdt < $logEntryCutoff) {
+                $message = "Custom timestamp is older than the configured 'deleted old raw data' value of $maxLogAge days";
+                Common::printDebug($message);
+                throw new InvalidRequestParameterException($message);
+            }
+        }
+
         return $cdt;
     }
 
@@ -645,7 +658,7 @@ class Request
         return substr(trim($input), 0, CustomVariables::getMaxLengthCustomVariables());
     }
 
-    protected function shouldUseThirdPartyCookie()
+    public function shouldUseThirdPartyCookie()
     {
         return (bool)Config::getInstance()->Tracker['use_third_party_id_cookie'];
     }
@@ -671,10 +684,19 @@ class Request
             return;
         }
 
+        if (\Piwik\Tracker\IgnoreCookie::isIgnoreCookieFound()) {
+            return;
+        }
+
         $cookie = $this->makeThirdPartyCookieUID();
         $idVisitor = bin2hex($idVisitor);
         $cookie->set(0, $idVisitor);
-        $cookie->save();
+        if (ProxyHttp::isHttps()) {
+            $cookie->setSecure(true);
+            $cookie->save('None');
+        } else {
+            $cookie->save('Lax');
+        }
 
         Common::printDebug(sprintf("We set the visitor ID to %s in the 3rd party cookie...", $idVisitor));
     }
@@ -728,14 +750,16 @@ class Request
     public function getVisitorId()
     {
         $found = false;
-        
-        // If User ID is set it takes precedence
-        $userId = $this->getForcedUserId();
-        if ($userId) {
-            $userIdHashed = $this->getUserIdHashed($userId);
-            $idVisitor = $this->truncateIdAsVisitorId($userIdHashed);
-            Common::printDebug("Request will be recorded for this user_id = " . $userId . " (idvisitor = $idVisitor)");
-            $found = true;
+
+        if (TrackerConfig::getConfigValue('enable_userid_overwrites_visitorid')) {
+            // If User ID is set it takes precedence
+            $userId = $this->getForcedUserId();
+            if ($userId) {
+                $userIdHashed = $this->getUserIdHashed($userId);
+                $idVisitor = $this->truncateIdAsVisitorId($userIdHashed);
+                Common::printDebug("Request will be recorded for this user_id = " . $userId . " (idvisitor = $idVisitor)");
+                $found = true;
+            }
         }
 
         // Was a Visitor ID "forced" (@see Tracking API setVisitorId()) for this request?

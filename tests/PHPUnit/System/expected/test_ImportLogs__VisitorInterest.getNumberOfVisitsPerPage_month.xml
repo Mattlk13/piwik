@@ -2,12 +2,12 @@
 <result>
 	<row>
 		<label>1 page</label>
-		<nb_visits>39</nb_visits>
+		<nb_visits>37</nb_visits>
 		<segment>actions==1</segment>
 	</row>
 	<row>
 		<label>2 pages</label>
-		<nb_visits>3</nb_visits>
+		<nb_visits>4</nb_visits>
 		<segment>actions==2</segment>
 	</row>
 	<row>

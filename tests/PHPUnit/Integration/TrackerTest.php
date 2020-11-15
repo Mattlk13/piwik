@@ -369,7 +369,7 @@ class TrackerTest extends IntegrationTestCase
     public function test_archiveInvalidation_differentServerAndWebsiteTimezones()
     {
         // Server timezone is UTC
-        ini_set('date.timezone', 'America/New_York');
+        ini_set('date.timezone', 'UTC');
 
         // Website timezone is New York
         $idSite = Fixture::createWebsite('2014-01-01 00:00:00', 0, false, false,
@@ -385,9 +385,8 @@ class TrackerTest extends IntegrationTestCase
         $this->request->setCurrentTimestamp(Date::$now);
         $this->tracker->trackRequest($this->request);
 
-        // Check for correct detection of whether the request's timestamp is 'today' in the appropriate timezone
-        // See Visit::markArchivedReportsAsInvalidIfArchiveAlreadyFinished() method
-        $this->assertEmpty(Option::getLike('report_to_invalidate_2_2019-04-02%'));
+        // make sure today archives are not invalidated
+        $this->assertEquals([], Option::getLike('report_to_invalidate_2_2019-04-02%'));
     }
 
     public function test_TrackingNewVisitOfKnownVisitor()
@@ -491,6 +490,8 @@ class TestTracker extends Tracker
 {
     public function __construct()
     {
+        parent::__construct();
+
         $this->isInstalled = true;
         $this->record = true;
     }

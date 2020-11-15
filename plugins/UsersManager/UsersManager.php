@@ -14,9 +14,11 @@ use Piwik\Access\Role\Write;
 use Piwik\API\Request;
 use Piwik\Auth\Password;
 use Piwik\Common;
+use Piwik\Config;
 use Piwik\Option;
 use Piwik\Piwik;
 use Piwik\Plugins\CoreHome\SystemSummary;
+use Piwik\Plugins\CorePluginsAdmin\CorePluginsAdmin;
 use Piwik\SettingsPiwik;
 
 /**
@@ -45,8 +47,25 @@ class UsersManager extends \Piwik\Plugin
         );
     }
 
+    public static function isUsersAdminEnabled()
+    {
+        return (bool) Config::getInstance()->General['enable_users_admin'];
+    }
+
+    public static function dieIfUsersAdminIsDisabled()
+    {
+        Piwik::checkUserIsNotAnonymous();
+        if (!self::isUsersAdminEnabled()) {
+            throw new \Exception('Creating, updating, and deleting users has been disabled.');
+        }
+    }
+
     public function addSystemSummaryItems(&$systemSummary)
     {
+        if (!self::isUsersAdminEnabled()) {
+            return;
+        }
+
         $userLogins = Request::processRequest('UsersManager.getUsersLogin', array('filter_limit' => '-1'));
 
         $numUsers = count($userLogins);
@@ -198,8 +217,9 @@ class UsersManager extends \Piwik\Plugin
 
     public static function getPasswordHash($password)
     {
-        self::checkBasicPasswordStrength($password);
-
+        if (SettingsPiwik::isUserCredentialsSanityCheckEnabled()) {
+            self::checkBasicPasswordStrength($password);
+        }
         // if change here, should also edit the installation process
         // to change how the root pwd is saved in the config file
         return md5($password);
@@ -239,6 +259,7 @@ class UsersManager extends \Piwik\Plugin
         $translationKeys[] = "General_Save";
         $translationKeys[] = "General_Done";
         $translationKeys[] = "General_Pagination";
+        $translationKeys[] = "General_PleaseTryAgain";
         $translationKeys[] = "UsersManager_DeleteConfirm";
         $translationKeys[] = "UsersManager_ConfirmGrantSuperUserAccess";
         $translationKeys[] = "UsersManager_ConfirmProhibitOtherUsersSuperUserAccess";
@@ -314,6 +335,7 @@ class UsersManager extends \Piwik\Plugin
         $translationKeys[] = 'General_Warning';
         $translationKeys[] = 'General_Add';
         $translationKeys[] = 'General_Note';
+        $translationKeys[] = 'General_Yes';
         $translationKeys[] = 'UsersManager_FilterByWebsite';
         $translationKeys[] = 'UsersManager_GiveAccessToAll';
         $translationKeys[] = 'UsersManager_OrManageIndividually';
@@ -324,5 +346,7 @@ class UsersManager extends \Piwik\Plugin
         $translationKeys[] = 'UsersManager_AreYouSureAddCapability';
         $translationKeys[] = 'UsersManager_AreYouSureRemoveCapability';
         $translationKeys[] = 'UsersManager_IncludedInUsersRole';
+        $translationKeys[] = 'UsersManager_NewsletterSignupFailureMessage';
+        $translationKeys[] = 'UsersManager_NewsletterSignupSuccessMessage';
     }
 }

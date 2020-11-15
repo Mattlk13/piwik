@@ -8,10 +8,12 @@ use Piwik\Config;
 
 return array(
 
-    'path.root' => PIWIK_USER_PATH,
+    'path.root' => PIWIK_DOCUMENT_ROOT,
+
+    'path.misc.user' => 'misc/user/',
 
     'path.tmp' => function (ContainerInterface $c) {
-        $root = $c->get('path.root');
+        $root = PIWIK_USER_PATH;
 
         // TODO remove that special case and instead have plugins override 'path.tmp' to add the instance id
         if ($c->has('ini.General.instance_id')) {
@@ -77,6 +79,8 @@ return array(
     'Piwik\Translation\Loader\LoaderInterface' => DI\object('Piwik\Translation\Loader\LoaderCache')
         ->constructor(DI\get('Piwik\Translation\Loader\JsonFileLoader')),
 
+    'DeviceDetector\Cache\Cache' => DI\object('Piwik\DeviceDetector\DeviceDetectorCache')->constructor(86400),
+
     'observers.global' => array(),
 
     /**
@@ -116,6 +120,8 @@ return array(
         'misc/package/WebAppGallery/*.xml',
         'misc/package/WebAppGallery/install.sql',
         'plugins/ImageGraph/fonts/unifont.ttf',
+        'plugins/*/config/tracker.php',
+        'plugins/*/config/config.php',
         'vendor/autoload.php',
         'vendor/composer/autoload_real.php',
         'vendor/szymach/c-pchart/app/*',
@@ -212,4 +218,6 @@ return array(
     'archiving.performance.logger' => null,
 
     \Piwik\CronArchive\Performance\Logger::class => DI\object()->constructorParameter('logger', DI\get('archiving.performance.logger')),
+
+    \Piwik\Concurrency\LockBackend::class => \DI\get(\Piwik\Concurrency\LockBackend\MySqlLockBackend::class),
 );

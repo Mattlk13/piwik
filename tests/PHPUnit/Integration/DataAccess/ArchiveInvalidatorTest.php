@@ -8,7 +8,10 @@
 
 namespace Piwik\Tests\Integration\DataAccess;
 
+use Piwik\ArchiveProcessor\ArchivingStatus;
+use Piwik\ArchiveProcessor\Parameters;
 use Piwik\ArchiveProcessor\Rules;
+use Piwik\Container\StaticContainer;
 use Piwik\CronArchive\SitesToReprocessDistributedList;
 use Piwik\DataAccess\ArchiveTableCreator;
 use Piwik\DataAccess\ArchiveWriter;
@@ -16,9 +19,12 @@ use Piwik\DataAccess\Model;
 use Piwik\Date;
 use Piwik\Db;
 use Piwik\Option;
+use Piwik\Period\Factory;
 use Piwik\Piwik;
 use Piwik\Plugins\CoreAdminHome\Tasks\ArchivesToPurgeDistributedList;
 use Piwik\Plugins\PrivacyManager\PrivacyManager;
+use Piwik\Site;
+use Piwik\Tests\Framework\Fixture;
 use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
 use Piwik\Archive\ArchiveInvalidator;
 use Piwik\Segment;
@@ -57,22 +63,32 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         self::$segment2 = new Segment(self::TEST_SEGMENT_2, array());
     }
 
+    protected static function beforeTableDataCached()
+    {
+        parent::beforeTableDataCached();
+
+        for ($i = 0; $i != 10; ++$i) {
+            Fixture::createWebsite('2012-03-04');
+        }
+    }
+
     public function setUp()
     {
         parent::setUp();
 
-        $this->invalidator = new ArchiveInvalidator(new Model());
+        $this->invalidator = new ArchiveInvalidator(new Model(), StaticContainer::get(ArchivingStatus::class));
     }
 
     public function test_rememberToInvalidateArchivedReportsLater_shouldCreateAnEntryInCaseThereIsNoneYet()
     {
         //Updated for change to allow for multiple transactions to invalidate the same report without deadlock.
         $key = 'report_to_invalidate_2_2014-04-05' . '_' . getmypid();
-        $this->assertFalse(Option::get($key));
+        $this->assertEmpty(Option::getLike('%'. $key . '%'));
 
-        $this->rememberReport(2, '2014-04-05');
+        $keyStored = $this->rememberReport(2, '2014-04-05');
 
-        $this->assertSame('1', Option::get($key));
+        $this->assertStringEndsWith($key, $keyStored);
+        $this->assertSame('1', Option::get($keyStored));
     }
 
     public function test_rememberToInvalidateArchivedReportsLater_shouldNotCreateEntryTwice()
@@ -81,7 +97,7 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         $this->rememberReport(2, '2014-04-05');
         $this->rememberReport(2, '2014-04-05');
 
-        $this->assertCount(1, Option::getLike('report_to_invalidate%'));
+        $this->assertCount(1, Option::getLike('%report_to_invalidate%'));
     }
 
     public function test_getRememberedArchivedReportsThatShouldBeInvalidated_shouldNotReturnEntriesInCaseNoneAreRemembered()
@@ -97,7 +113,22 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
 
         $reports = $this->invalidator->getRememberedArchivedReportsThatShouldBeInvalidated();
 
-        $this->assertSame($this->getRememberedReportsByDate(), $reports);
+        $this->assertSameReports($this->getRememberedReportsByDate(), $reports);
+    }
+
+    private function assertSameReports($expected, $actual)
+    {
+        $keys1 = array_keys($expected);
+        $keys2 = array_keys($actual);
+        sort($keys1);
+        sort($keys2);
+
+        $this->assertSame($keys1, $keys2);
+        foreach ($expected as $index => $values) {
+            sort($values);
+            sort($actual[$index]);
+            $this->assertSame($values, $actual[$index]);
+        }
     }
 
     public function test_forgetRememberedArchivedReportsToInvalidateForSite_shouldNotDeleteAnythingInCaseNoReportForThatSite()
@@ -107,7 +138,7 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         $this->invalidator->forgetRememberedArchivedReportsToInvalidateForSite(10);
         $reports = $this->invalidator->getRememberedArchivedReportsThatShouldBeInvalidated();
 
-        $this->assertSame($this->getRememberedReportsByDate(), $reports);
+        $this->assertSameReports($this->getRememberedReportsByDate(), $reports);
     }
 
     public function test_forgetRememberedArchivedReportsToInvalidateForSite_shouldOnlyDeleteReportsBelongingToThatSite()
@@ -122,7 +153,7 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
             '2014-05-05' => array(2, 5),
             '2014-04-06' => array(3)
         );
-        $this->assertSame($expected, $reports);
+        $this->assertSameReports($expected, $reports);
     }
 
     public function test_forgetRememberedArchivedReportsToInvalidate_shouldNotForgetAnythingIfThereIsNoMatch()
@@ -132,12 +163,12 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         // site does not match
         $this->invalidator->forgetRememberedArchivedReportsToInvalidate(10, Date::factory('2014-04-05'));
         $reports = $this->invalidator->getRememberedArchivedReportsThatShouldBeInvalidated();
-        $this->assertSame($this->getRememberedReportsByDate(), $reports);
+        $this->assertSameReports($this->getRememberedReportsByDate(), $reports);
 
         // date does not match
         $this->invalidator->forgetRememberedArchivedReportsToInvalidate(7, Date::factory('2012-04-05'));
         $reports = $this->invalidator->getRememberedArchivedReportsThatShouldBeInvalidated();
-        $this->assertSame($this->getRememberedReportsByDate(), $reports);
+        $this->assertSameReports($this->getRememberedReportsByDate(), $reports);
     }
 
     public function test_forgetRememberedArchivedReportsToInvalidate_shouldOnlyDeleteReportBelongingToThatSiteAndDate()
@@ -154,13 +185,13 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
             '2014-04-08' => array(7),
             '2014-05-08' => array(7),
         );
-        $this->assertSame($expected, $reports);
+        $this->assertSameReports($expected, $reports);
 
         unset($expected['2014-05-08']);
 
         $this->invalidator->forgetRememberedArchivedReportsToInvalidate(7, Date::factory('2014-05-08'));
         $reports = $this->invalidator->getRememberedArchivedReportsThatShouldBeInvalidated();
-        $this->assertSame($expected, $reports);
+        $this->assertSameReports($expected, $reports);
     }
 
     public function test_markArchivesAsInvalidated_shouldForgetInvalidatedSitesAndDates()
@@ -183,21 +214,21 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
             '2014-04-06' => array(3),
             '2014-05-08' => array(7),
         );
-        $this->assertSame($expected, $reports);
+        $this->assertSameReports($expected, $reports);
     }
 
     private function rememberReport($idSite, $date)
     {
         $date = Date::factory($date);
-        $this->invalidator->rememberToInvalidateArchivedReportsLater($idSite, $date);
+        return $this->invalidator->rememberToInvalidateArchivedReportsLater($idSite, $date);
     }
 
     private function getRememberedReportsByDate()
     {
         return array(
-            '2014-04-05' => array(1, 2, 4, 7),
-            '2014-05-05' => array(2, 5),
             '2014-04-06' => array(3),
+            '2014-04-05' => array(4, 7, 2, 1),
+            '2014-05-05' => array(5, 2),
             '2014-04-08' => array(7),
             '2014-05-08' => array(7),
         );
@@ -300,6 +331,34 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         $result = $archiveInvalidator->markArchivesAsInvalidated($idSites, $dates, $period, $segment, $cascadeDown);
 
         $this->assertEquals($dates, $result->processedDates);
+
+        $idArchives = $this->getInvalidatedArchives();
+
+        // Remove empty values (some new empty entries may be added each month)
+        $idArchives = array_filter($idArchives);
+        $expectedIdArchives = array_filter($expectedIdArchives);
+
+        $this->assertEquals($expectedIdArchives, $idArchives);
+    }
+
+    /**
+     * @dataProvider getTestDataForMarkArchiveRangesAsInvalidated
+     */
+    public function test_markArchivesAsInvalidated_MarksAllSubrangesOfRange($idSites, $dates, $segment, $expectedIdArchives)
+    {
+        $dates = array_map(array('Piwik\Date', 'factory'), $dates);
+
+        $this->insertArchiveRowsForTest();
+
+        if (!empty($segment)) {
+            $segment = new Segment($segment, $idSites);
+        }
+
+        /** @var ArchiveInvalidator $archiveInvalidator */
+        $archiveInvalidator = self::$fixture->piwikEnvironment->getContainer()->get('Piwik\Archive\ArchiveInvalidator');
+        $result = $archiveInvalidator->markArchivesOverlappingRangeAsInvalidated($idSites, array($dates), $segment);
+
+        $this->assertEquals(array($dates[0]), $result->processedDates);
 
         $idArchives = $this->getInvalidatedArchives();
 
@@ -462,7 +521,21 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
                 ),
             ),
 
-            // range period, one site, cascade = true
+            // range period, exact match
+            array(
+                array(1),
+                array('2015-01-01', '2015-01-10'),
+                'range',
+                null,
+                true,
+                array(
+                    '2015_01' => array(
+                        '1.2015-01-01.2015-01-10.5.done.VisitsSummary',
+                    ),
+                ),
+            ),
+
+            // range period, overlapping a range in the DB
             array(
                 array(1),
                 array('2015-01-02', '2015-03-05'),
@@ -472,11 +545,7 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
                 array(
                     '2015_01' => array(
                         '1.2015-01-01.2015-01-10.5.done.VisitsSummary',
-                    ),
-                    '2015_03' => array(
-                        '1.2015-03-04.2015-03-05.5.done.VisitsSummary',
-                        '1.2015-03-05.2015-03-10.5.done3736b708e4d20cfc10610e816a1b2341.UserCountry',
-                    ),
+                    )
                 ),
             ),
 
@@ -532,6 +601,101 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         );
     }
 
+    public function getTestDataForMarkArchiveRangesAsInvalidated()
+    {
+        // $idSites, $dates, $segment, $expectedIdArchives
+        return array(
+            // range period, has an exact match, also a match where DB end date = reference start date
+            array(
+                array(1),
+                array('2015-01-01', '2015-01-10'),
+                null,
+                array(
+                    '2014_12' => array(
+                        '1.2014-12-05.2015-01-01.5.done.VisitsSummary',
+                    ),
+                    '2015_01' => array(
+                        '1.2015-01-01.2015-01-10.5.done.VisitsSummary',
+                    ),
+                ),
+            ),
+
+            // range period, overlapping range = a match
+            array(
+                array(1),
+                array('2015-01-02', '2015-03-05'),
+                null,
+                array(
+                    '2015_01' => array(
+                        '1.2015-01-01.2015-01-10.5.done.VisitsSummary',
+                    ),
+                    '2015_03' => array(
+                        '1.2015-03-04.2015-03-05.5.done.VisitsSummary',
+                        '1.2015-03-05.2015-03-10.5.done3736b708e4d20cfc10610e816a1b2341.UserCountry',
+                    ),
+                ),
+            ),
+
+            // range period, small range within the 2014-12-05 to 2015-01-01 range should cause it to be invalidated
+            array(
+                array(1),
+                array('2014-12-18', '2014-12-20'),
+                null,
+                array(
+                    '2014_12' => array(
+                        '1.2014-12-05.2015-01-01.5.done.VisitsSummary',
+                    ),
+                ),
+            ),
+
+            // range period, range that overlaps start of archived range
+            array(
+                array(1),
+                array('2014-12-01', '2014-12-05'),
+                null,
+                array(
+                    '2014_12' => array(
+                        '1.2014-12-05.2015-01-01.5.done.VisitsSummary',
+                    ),
+                ),
+            ),
+
+            // range period, large range that includes the smallest archived range (3 to 4 March)
+            array(
+                array(1),
+                array('2015-01-11', '2015-03-30'),
+                null,
+                array(
+                    '2015_03' => array(
+                        '1.2015-03-04.2015-03-05.5.done.VisitsSummary',
+                        '1.2015-03-05.2015-03-10.5.done3736b708e4d20cfc10610e816a1b2341.UserCountry',
+                    ),
+                ),
+            ),
+
+            // range period, doesn't match any archived ranges
+            array(
+                array(1),
+                array('2014-12-01', '2014-12-04'),
+                null,
+                array(
+                ),
+            ),
+
+            // three-month range period, there's a range archive for the middle month
+            array(
+                array(1),
+                array('2014-09-01', '2014-11-08'),
+                null,
+                array(
+                    '2014_10' => array(
+                        '1.2014-10-15.2014-10-20.5.done3736b708e4d20cfc10610e816a1b2341',
+                    ),
+                ),
+            ),
+        );
+    }
+
     private function getInvalidatedIdArchives()
     {
         $result = array();
@@ -579,7 +743,13 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
             }
         }
 
-        $rangePeriods = array('2015-03-04,2015-03-05', '2014-12-05,2015-01-01', '2015-03-05,2015-03-10', '2015-01-01,2015-01-10');
+        $rangePeriods = array(
+            '2015-03-04,2015-03-05', 
+            '2014-12-05,2015-01-01', 
+            '2015-03-05,2015-03-10', 
+            '2015-01-01,2015-01-10',
+            '2014-10-15,2014-10-20'
+        );
         foreach ($rangePeriods as $dateRange) {
             $this->insertArchiveRow($idSite = 1, $dateRange, 'range');
         }

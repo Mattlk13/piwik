@@ -12,6 +12,7 @@ use Exception;
 use Piwik\AssetManager;
 use Piwik\Common;
 use Piwik\Config;
+use Piwik\DataTable\Renderer\Json;
 use Piwik\DbHelper;
 use Piwik\Filechecks;
 use Piwik\FileIntegrity;
@@ -19,7 +20,6 @@ use Piwik\Filesystem;
 use Piwik\Http;
 use Piwik\Option;
 use Piwik\Piwik;
-use Piwik\Plugin;
 use Piwik\Plugin\Manager as PluginManager;
 use Piwik\Plugins\LanguagesManager\LanguagesManager;
 use Piwik\Plugins\Marketplace\Plugins;
@@ -99,9 +99,9 @@ class Controller extends \Piwik\Plugin\Controller
             'plugins/CoreHome/javascripts/donate.js',
             'plugins/CoreUpdater/javascripts/updateLayout.js',
             'libs/bower_components/angular/angular.min.js',
-            'libs/bower_components/angular-sanitize/angular-sanitize.js',
-            'libs/bower_components/angular-animate/angular-animate.js',
-            'libs/bower_components/angular-cookies/angular-cookies.js',
+            'libs/bower_components/angular-sanitize/angular-sanitize.min.js',
+            'libs/bower_components/angular-animate/angular-animate.min.js',
+            'libs/bower_components/angular-cookies/angular-cookies.min.js',
             'libs/bower_components/ngDialog/js/ngDialog.min.js',
             'plugins/CoreHome/angularjs/common/services/service.module.js',
             'plugins/CoreHome/angularjs/common/filters/filter.module.js',
@@ -172,6 +172,41 @@ class Controller extends \Piwik\Plugin\Controller
         return $view->render();
     }
 
+    public function oneClickUpdatePartTwo()
+    {
+        Json::sendHeaderJSON();
+
+        $task = "Couldn't update Marketplace plugins.";
+
+        $nonce = Common::getRequestVar('nonce', '', 'string');
+        if (empty($nonce)) {
+            return json_encode(['No token. ' . $task]);
+        }
+        $value = Option::get('NonceOneClickUpdatePartTwo');
+        if (empty($value)) {
+            return json_encode(['Invalid token. ' . $task]);
+        }
+        $value = json_decode($value, true);
+
+        if (empty($value['nonce'])
+            || empty($value['ttl'])
+            || time() > (int) $value['ttl']
+            || $nonce !== $value['nonce']) {
+            return json_encode(['Invalid nonce or nonce expired. ' . $task]);
+        }
+
+        try {
+            $messages = $this->updater->oneClickUpdatePartTwo();
+        } catch (UpdaterException $e) {
+            $messages = $e->getUpdateLogMessages();
+            $messages[] = $e->getMessage();
+        } catch (Exception $e) {
+            $messages = [$e->getMessage()];
+        }
+
+        return json_encode($messages);
+    }
+
     public function oneClickResults()
     {
         Filesystem::deleteAllCacheOnUpdate();
@@ -185,10 +220,14 @@ class Controller extends \Piwik\Plugin\Controller
         } elseif ($error) {
             $view = new View('@CoreUpdater/updateHttpError');
             $view->error = $error;
-            $view->feedbackMessages = safe_unserialize(Common::unsanitizeInputValue(Common::getRequestVar('messages', '', 'string', $_POST)));
         } else {
             $view = new View('@CoreUpdater/updateSuccess');
         }
+        $messages = safe_unserialize(Common::unsanitizeInputValue(Common::getRequestVar('messages', '', 'string', $_POST)));
+        if (!is_array($messages)) {
+            $messages = array();
+        }
+        $view->feedbackMessages = $messages;
 
         $this->addCustomLogoInfo($view);
         $this->setBasicVariablesView($view);

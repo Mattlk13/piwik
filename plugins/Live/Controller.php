@@ -13,6 +13,7 @@ use Piwik\Common;
 use Piwik\Config;
 use Piwik\Container\StaticContainer;
 use Piwik\Piwik;
+use Piwik\DataTable;
 use Piwik\Plugins\Goals\API as APIGoals;
 use Piwik\Plugins\Live\Visualizations\VisitorLog;
 use Piwik\Url;
@@ -88,8 +89,15 @@ class Controller extends \Piwik\Plugin\Controller
 
         $view = new View('@Live/getLastVisitsStart');
         $view->idSite = (int) $this->idSite;
-        $api = new Request("method=Live.getLastVisitsDetails&idSite={$this->idSite}&filter_limit=10&format=original&serialize=0&disable_generic_filters=1");
-        $visitors = $api->process();
+        $error = '';
+        $visitors = new DataTable();
+        try {
+            $api = new Request("method=Live.getLastVisitsDetails&idSite={$this->idSite}&filter_limit=10&format=original&serialize=0&disable_generic_filters=1");
+            $visitors = $api->process();
+        } catch (\Exception $e) {
+            $error = $e->getMessage();
+        }
+        $view->error = $error;
         $view->visitors = $visitors;
 
         return $this->render($view);
@@ -188,6 +196,8 @@ class Controller extends \Piwik\Plugin\Controller
         if (empty($nextVisits)) {
             return '';
         }
+
+        VisitorLog::groupActionsByPageviewId($nextVisits);
 
         $view = new View('@Live/getVisitList.twig');
         $view->idSite = $this->idSite;

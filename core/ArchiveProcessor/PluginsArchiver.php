@@ -61,14 +61,14 @@ class PluginsArchiver
      */
     private $shouldAggregateFromRawData;
 
-    public function __construct(Parameters $params, $isTemporaryArchive, ArchiveWriter $archiveWriter = null)
+    public function __construct(Parameters $params, ArchiveWriter $archiveWriter = null)
     {
         $this->params = $params;
-        $this->isTemporaryArchive = $isTemporaryArchive;
-        $this->archiveWriter = $archiveWriter ?: new ArchiveWriter($this->params, $this->isTemporaryArchive);
+        $this->archiveWriter = $archiveWriter ?: new ArchiveWriter($this->params);
         $this->archiveWriter->initNewArchive();
 
         $this->logAggregator = new LogAggregator($params);
+        $this->logAggregator->allowUsageSegmentCache();
 
         $this->archiveProcessor = new ArchiveProcessor($this->params, $this->archiveWriter, $this->logAggregator);
 
@@ -99,6 +99,7 @@ class PluginsArchiver
      */
     public function callAggregateCoreMetrics()
     {
+        $this->logAggregator->cleanup();
         $this->logAggregator->setQueryOriginHint('Core');
 
         if ($this->shouldAggregateFromRawData) {
@@ -159,13 +160,15 @@ class PluginsArchiver
                 try {
                     self::$currentPluginBeingArchived = $pluginName;
 
+                    $period = $this->params->getPeriod()->getLabel();
+
                     $timer = new Timer();
                     if ($this->shouldAggregateFromRawData) {
-                        Log::debug("PluginsArchiver::%s: Archiving day reports for plugin '%s'.", __FUNCTION__, $pluginName);
+                        Log::debug("PluginsArchiver::%s: Archiving $period reports for plugin '%s' from raw data.", __FUNCTION__, $pluginName);
 
                         $archiver->callAggregateDayReport();
                     } else {
-                        Log::debug("PluginsArchiver::%s: Archiving period reports for plugin '%s'.", __FUNCTION__, $pluginName);
+                        Log::debug("PluginsArchiver::%s: Archiving $period reports for plugin '%s' using reports for smaller periods.", __FUNCTION__, $pluginName);
 
                         $archiver->callAggregateMultipleReports();
                     }
@@ -193,13 +196,17 @@ class PluginsArchiver
             Manager::getInstance()->deleteAll($latestUsedTableId);
             unset($archiver);
         }
+
+        $this->logAggregator->cleanup();
     }
 
     public function finalizeArchive()
     {
-        $this->params->logStatusDebug($this->archiveWriter->isArchiveTemporary);
+        $this->params->logStatusDebug();
         $this->archiveWriter->finalizeArchive();
-        return $this->archiveWriter->getIdArchive();
+        $idArchive = $this->archiveWriter->getIdArchive();
+
+        return $idArchive;
     }
 
     /**
@@ -262,7 +269,7 @@ class PluginsArchiver
         }
 
         if (Rules::shouldProcessReportsAllPlugins(
-            $this->params->getIdSites(),
+            array($this->params->getSite()->getId()),
             $this->params->getSegment(),
             $this->params->getPeriod()->getLabel())) {
             return true;
@@ -318,9 +325,9 @@ class PluginsArchiver
          * @param \Piwik\Plugin\Archiver &$archiver The newly created plugin archiver instance.
          * @param string $pluginName The name of plugin of which archiver instance was created.
          * @param array $this->params Array containing archive parameters (Site, Period, Date and Segment)
-         * @param bool $this->isTemporaryArchive Flag indicating whether the archive being processed is temporary (ie. the period isn't finished yet) or final (the period is already finished and in the past).
+         * @param bool false This parameter is deprecated and will be removed.
          */
-        Piwik::postEvent('Archiving.makeNewArchiverObject', array($archiver, $pluginName, $this->params, $this->isTemporaryArchive));
+        Piwik::postEvent('Archiving.makeNewArchiverObject', array($archiver, $pluginName, $this->params, false));
 
         return $archiver;
     }
