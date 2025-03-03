@@ -9,11 +9,14 @@
 namespace Piwik\Plugins\CoreAdminHome;
 
 use Piwik\API\Request;
+use Piwik\Archive;
+use Piwik\Archive\ArchiveInvalidator;
 use Piwik\ArchiveProcessor\Rules;
 use Piwik\Archive\ArchivePurger;
 use Piwik\Common;
 use Piwik\Config;
 use Piwik\Container\StaticContainer;
+use Piwik\CronArchive;
 use Piwik\DataAccess\ArchiveTableCreator;
 use Piwik\Date;
 use Piwik\Db;
@@ -23,12 +26,13 @@ use Piwik\Piwik;
 use Piwik\Plugins\CoreAdminHome\Emails\JsTrackingCodeMissingEmail;
 use Piwik\Plugins\CoreAdminHome\Emails\TrackingFailuresEmail;
 use Piwik\Plugins\CoreAdminHome\Tasks\ArchivesToPurgeDistributedList;
+use Piwik\Plugins\SegmentEditor\Model;
 use Piwik\Plugins\SitesManager\SitesManager;
 use Piwik\Scheduler\Schedule\SpecificTime;
-use Piwik\Segment;
 use Piwik\Settings\Storage\Backend\MeasurableSettingsTable;
 use Piwik\Tracker\Failures;
 use Piwik\Site;
+use Piwik\Tracker\FingerprintSalt;
 use Piwik\Tracker\Visit\ReferrerSpamFilter;
 use Psr\Log\LoggerInterface;
 use Piwik\SettingsPiwik;
@@ -60,6 +64,12 @@ class Tasks extends \Piwik\Plugin\Tasks
 
     public function schedule()
     {
+        // for browser triggered archiving, make sure we invalidate archives once a day just to make
+        // sure all archives that need to be invalidated get invalidated
+        $this->daily('invalidateOutdatedArchives', null, self::HIGH_PRIORITY);
+
+        $this->daily('deleteOldFingerprintSalts', null, self::HIGH_PRIORITY);
+
         // general data purge on older archive tables, executed daily
         $this->daily('purgeOutdatedArchives', null, self::HIGH_PRIORITY);
 
@@ -79,6 +89,22 @@ class Tasks extends \Piwik\Plugin\Tasks
         }
 
         $this->scheduleTrackingCodeReminderChecks();
+    }
+
+    public function deleteOldFingerprintSalts()
+    {
+        StaticContainer::get(FingerprintSalt::class)->deleteOldSalts();
+    }
+
+    public function invalidateOutdatedArchives()
+    {
+        if (!Rules::isBrowserTriggerEnabled()) {
+            $this->logger->info("Browser triggered archiving disabled, archives will be invalidated during core:archive.");
+            return;
+        }
+
+        $cronArchive = new CronArchive();
+        $cronArchive->invalidateArchivedReportsForSitesThatNeedToBeArchivedAgain();
     }
 
     private function scheduleTrackingCodeReminderChecks()
@@ -177,6 +203,7 @@ class Tasks extends \Piwik\Plugin\Tasks
      */
     public function notifyTrackingFailures()
     {
+        $this->cleanupTrackingFailures();
         $failures = $this->trackingFailures->getAllFailures();
         $general = Config::getInstance()->General;
         if (!empty($failures) && $general['enable_tracking_failures_notification']) {
@@ -233,11 +260,36 @@ class Tasks extends \Piwik\Plugin\Tasks
 
     public function purgeInvalidatedArchives()
     {
+        $purgedDates = [];
+
         $archivesToPurge = new ArchivesToPurgeDistributedList();
         foreach ($archivesToPurge->getAllAsDates() as $date) {
             $this->archivePurger->purgeInvalidatedArchivesFrom($date);
 
             $archivesToPurge->removeDate($date);
+
+            $purgedDates[$date->toString('Y-m')] = true;
+        }
+
+        // purge from today if not done already since we will have many archives to remove
+        $today = Date::today();
+        $todayStr = $today->toString('Y-m');
+        if (empty($purgedDates[$todayStr])) {
+            $this->archivePurger->purgeInvalidatedArchivesFrom($today);
+            $purgedDates[$todayStr] = true;
+        }
+
+        // handle yesterday if it belongs to a different month
+        $yesterday = Date::yesterday();
+        $yesterdayStr = $yesterday->toString('Y-m');
+        if (empty($purgedDates[$yesterdayStr])) {
+            $this->archivePurger->purgeInvalidatedArchivesFrom($yesterday);
+        }
+
+        // handle year start table
+        $yearStart = $today->toString('Y-01');
+        if (empty($purgedDates[$yearStart])) {
+            $this->archivePurger->purgeInvalidatedArchivesFrom(Date::factory($yearStart . '-01'));
         }
     }
 
@@ -275,7 +327,10 @@ class Tasks extends \Piwik\Plugin\Tasks
      */
     public function purgeOrphanedArchives()
     {
-        $segmentHashesByIdSite = $this->getSegmentHashesByIdSite();
+        $eightDaysAgo = Date::factory('now')->subDay(8);
+        $model = new Model();
+        $deletedSegments = $model->getSegmentsDeletedSince($eightDaysAgo);
+
         $archiveTables = ArchiveTableCreator::getTablesArchivesInstalled('numeric');
 
         $datesPurged = array();
@@ -286,32 +341,12 @@ class Tasks extends \Piwik\Plugin\Tasks
             $dateObj = Date::factory("$year-$month-15");
 
             $this->archivePurger->purgeDeletedSiteArchives($dateObj);
-            $this->archivePurger->purgeDeletedSegmentArchives($dateObj, $segmentHashesByIdSite);
+            if (count($deletedSegments)) {
+                $this->archivePurger->purgeDeletedSegmentArchives($dateObj, $deletedSegments);
+            }
 
             $datesPurged[$date] = true;
         }
-    }
-
-    /**
-     * Get a list of all segment hashes that currently exist, indexed by idSite.
-     * @return array
-     */
-    public function getSegmentHashesByIdSite()
-    {
-        //Get a list of hashes of all segments that exist now
-        $sql = "SELECT DISTINCT definition, enable_only_idsite FROM " . Common::prefixTable('segment')
-            . " WHERE deleted = 0";
-        $rows = Db::fetchAll($sql);
-        $segmentHashes = array();
-        foreach ($rows as $row) {
-            $idSite = (int)$row['enable_only_idsite'];
-            if (! isset($segmentHashes[$idSite])) {
-                $segmentHashes[$idSite] = array();
-            }
-            $segmentHashes[$idSite][] = Segment::getSegmentHash($row['definition']);
-        }
-
-        return $segmentHashes;
     }
 
     /**

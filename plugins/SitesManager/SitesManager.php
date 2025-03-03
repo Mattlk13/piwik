@@ -11,13 +11,16 @@ namespace Piwik\Plugins\SitesManager;
 use Piwik\Access;
 use Piwik\API\Request;
 use Piwik\Common;
+use Piwik\Config;
 use Piwik\Container\StaticContainer;
+use Piwik\Date;
 use Piwik\Exception\UnexpectedWebsiteFoundException;
 use Piwik\Option;
 use Piwik\Piwik;
 use Piwik\Plugins\CoreHome\SystemSummary;
 use Piwik\Settings\Storage\Backend\MeasurableSettingsTable;
 use Piwik\Tracker\Cache;
+use Piwik\Tracker\FingerprintSalt;
 use Piwik\Tracker\Model as TrackerModel;
 use Piwik\Session\SessionNamespace;
 
@@ -47,11 +50,26 @@ class SitesManager extends \Piwik\Plugin
         );
     }
 
+    public static function isSitesAdminEnabled()
+    {
+        return (bool) Config::getInstance()->General['enable_sites_admin'];
+    }
+
+    public static function dieIfSitesAdminIsDisabled()
+    {
+        Piwik::checkUserIsNotAnonymous();
+        if (!self::isSitesAdminEnabled()) {
+            throw new \Exception('Creating, updating, and deleting sites has been disabled.');
+        }
+    }
+
     public function addSystemSummaryItems(&$systemSummary)
     {
-        $websites = Request::processRequest('SitesManager.getAllSites', array('filter_limit' => '-1'));
-        $numWebsites = count($websites);
-        $systemSummary[] = new SystemSummary\Item($key = 'websites', Piwik::translate('CoreHome_SystemSummaryNWebsites', $numWebsites), $value = null, $url = array('module' => 'SitesManager', 'action' => 'index'), $icon = '', $order = 10);
+        if (self::isSitesAdminEnabled()) {
+            $websites = Request::processRequest('SitesManager.getAllSites', array('filter_limit' => '-1'));
+            $numWebsites = count($websites);
+            $systemSummary[] = new SystemSummary\Item($key = 'websites', Piwik::translate('CoreHome_SystemSummaryNWebsites', $numWebsites), $value = null, $url = array('module' => 'SitesManager', 'action' => 'index'), $icon = '', $order = 10);
+        }
     }
 
     public function redirectDashboardToWelcomePage(&$module, &$action)
@@ -181,6 +199,16 @@ class SitesManager extends \Piwik\Plugin
         $array['timezone'] = $this->getTimezoneFromWebsite($website);
         $array['ts_created'] = $website['ts_created'];
         $array['type'] = $website['type'];
+
+        // we make sure to have the fingerprint salts for the last 3 days incl tmrw in the cache so we don't need to
+        // query the DB directly for these days
+        $datesToGenerateSalt = array(Date::now()->addDay(1), Date::now(), Date::now()->subDay(1), Date::now()->subDay(2));
+
+        $fingerprintSaltKey = new FingerprintSalt();
+        foreach ($datesToGenerateSalt as $date) {
+            $dateString = $fingerprintSaltKey->getDateString($date, $array['timezone']);
+            $array[FingerprintSalt::OPTION_PREFIX . $dateString] = $fingerprintSaltKey->getSalt($dateString, $idSite);
+        }
     }
 
     public function setTrackerCacheGeneral(&$cache)
@@ -272,9 +300,7 @@ class SitesManager extends \Piwik\Plugin
     private static function getExcludedUserAgents($website)
     {
         $excludedUserAgents = API::getInstance()->getExcludedUserAgentsGlobal();
-        if (API::getInstance()->isSiteSpecificUserAgentExcludeEnabled()) {
-            $excludedUserAgents .= ',' . $website['excluded_user_agents'];
-        }
+        $excludedUserAgents .= ',' . $website['excluded_user_agents'];
         return self::filterBlankFromCommaSepList($excludedUserAgents);
     }
 
@@ -387,8 +413,6 @@ class SitesManager extends \Piwik\Plugin
         $translationKeys[] = "SitesManager_GlobalListExcludedQueryParameters";
         $translationKeys[] = "SitesManager_ListOfQueryParametersToBeExcludedOnAllWebsites";
         $translationKeys[] = "SitesManager_GlobalListExcludedUserAgents";
-        $translationKeys[] = "SitesManager_EnableSiteSpecificUserAgentExclude_Help";
-        $translationKeys[] = "SitesManager_EnableSiteSpecificUserAgentExclude";
         $translationKeys[] = "SitesManager_KeepURLFragments";
         $translationKeys[] = "SitesManager_KeepURLFragmentsHelp";
         $translationKeys[] = "SitesManager_KeepURLFragmentsHelp2";
@@ -409,5 +433,8 @@ class SitesManager extends \Piwik\Plugin
         $translationKeys[] = "Goals_Ecommerce";
         $translationKeys[] = "SitesManager_NotFound";
         $translationKeys[] = "SitesManager_DeleteSiteExplanation";
+        $translationKeys[] = "SitesManager_EmailInstructionsButton";
+        $translationKeys[] = "SitesManager_EmailInstructionsSubject";
+        $translationKeys[] = "SitesManager_JsTrackingTagHelp";
     }
 }

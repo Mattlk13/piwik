@@ -17,6 +17,7 @@ use Piwik\Tracker\Cache;
 use Piwik\Tracker\Request;
 use Piwik\Tracker\RequestProcessor;
 use Piwik\Tracker\Settings;
+use Piwik\Tracker\TrackerConfig;
 use Piwik\Tracker\Visit\VisitProperties;
 use Piwik\Tracker\VisitExcluded;
 use Piwik\Tracker\VisitorRecognizer;
@@ -189,6 +190,12 @@ class VisitRequestProcessor extends RequestProcessor
             return true;
         }
 
+        if (!TrackerConfig::getConfigValue('enable_userid_overwrites_visitorid')
+            && !$this->lastUserIdWasSetAndDoesMatch($visitProperties, $request)) {
+            Common::printDebug("Visitor detected, but last user_id does not match...");
+            return true;
+        }
+
         return false;
     }
 
@@ -262,5 +269,26 @@ class VisitRequestProcessor extends RequestProcessor
         }
 
         return $visitProperties->getProperty('visit_last_action_time');
+    }
+
+    /**
+     * Returns true if the last user_id did not change.
+     * @return bool
+     */
+    protected function lastUserIdWasSetAndDoesMatch(VisitProperties $visitProperties, Request $request)
+    {
+        $lastUserId = $visitProperties->getProperty('user_id');
+        
+        if(empty($lastUserId)) {
+            return true;
+        }
+        
+        $currentUserId = $request->getForcedUserId();
+        
+        if(empty($currentUserId)) {
+            return true;
+        }
+        
+        return $lastUserId === $currentUserId;
     }
 }

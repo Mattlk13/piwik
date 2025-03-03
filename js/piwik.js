@@ -28,7 +28,7 @@
 
 /*global JSON_PIWIK:true */
 
-if (typeof JSON_PIWIK !== 'object' && typeof window.JSON === 'object' && window.JSON.stringify && window.JSON.parse) {
+if (typeof window.JSON === 'object' && typeof window.JSON.stringify === 'function' && typeof window.JSON.parse === 'function') {
     JSON_PIWIK = window.JSON;
 } else {
     (function () {
@@ -960,11 +960,12 @@ if (typeof JSON_PIWIK !== 'object' && typeof window.JSON === 'object' && window.
 /*members Piwik, Matomo, encodeURIComponent, decodeURIComponent, getElementsByTagName,
     shift, unshift, piwikAsyncInit, piwikPluginAsyncInit, frameElement, self, hasFocus,
     createElement, appendChild, characterSet, charset, all,
-    addEventListener, attachEvent, removeEventListener, detachEvent, disableCookies,
-    cookie, domain, readyState, documentElement, doScroll, title, text,
+    addEventListener, attachEvent, removeEventListener, detachEvent, disableCookies, setCookieConsentGiven,
+    areCookiesEnabled, getRememberedCookieConsent, rememberCookieConsentGiven, forgetCookieConsentGiven, requireCookieConsent,
+    cookie, domain, readyState, documentElement, doScroll, title, text, contentWindow, postMessage,
     location, top, onerror, document, referrer, parent, links, href, protocol, name, GearsFactory,
     performance, mozPerformance, msPerformance, webkitPerformance, timing, requestStart,
-    responseEnd, event, which, button, srcElement, type, target,
+    responseEnd, event, which, button, srcElement, type, target, data,
     parentNode, tagName, hostname, className,
     userAgent, cookieEnabled, sendBeacon, platform, mimeTypes, enabledPlugin, javaEnabled,
     XMLHttpRequest, ActiveXObject, open, setRequestHeader, onreadystatechange, send, readyState, status,
@@ -974,7 +975,8 @@ if (typeof JSON_PIWIK !== 'object' && typeof window.JSON === 'object' && window.
     min, round, random, floor,
     exec, success, trackerUrl, isSendBeacon, xhr,
     res, width, height,
-    pdf, qt, realp, wma, dir, fla, java, gears, ag,
+    pdf, qt, realp, wma, dir, fla, java, gears, ag, showModalDialog,
+    maq_initial_value, maq_opted_in, maq_optout_by_default, maq_url,
     initialized, hook, getHook, resetUserId, getVisitorId, getVisitorInfo, setUserId, getUserId, setSiteId, getSiteId, setTrackerUrl, getTrackerUrl, appendToTrackingUrl, getRequest, addPlugin,
     getAttributionInfo, getAttributionCampaignName, getAttributionCampaignKeyword,
     getAttributionReferrerTimestamp, getAttributionReferrerUrl,
@@ -986,19 +988,19 @@ if (typeof JSON_PIWIK !== 'object' && typeof window.JSON === 'object' && window.
     setReferrerUrl, setCustomUrl, setAPIUrl, setDocumentTitle, getPiwikUrl, getCurrentUrl,
     setDownloadClasses, setLinkClasses,
     setCampaignNameKey, setCampaignKeywordKey,
-    getConsentRequestsQueue, requireConsent, getRememberedConsent, hasRememberedConsent, setConsentGiven,
-    rememberConsentGiven, forgetConsentGiven, unload, hasConsent,
+    getConsentRequestsQueue, requireConsent, getRememberedConsent, hasRememberedConsent, isConsentRequired,
+    setConsentGiven, rememberConsentGiven, forgetConsentGiven, unload, hasConsent,
     discardHashTag, alwaysUseSendBeacon,
     setCookieNamePrefix, setCookieDomain, setCookiePath, setSecureCookie, setVisitorIdCookie, getCookieDomain, hasCookies, setSessionCookie,
     setVisitorCookieTimeout, setSessionCookieTimeout, setReferralCookieTimeout, getCookie, getCookiePath, getSessionCookieTimeout,
     setConversionAttributionFirstReferrer, tracker, request,
-    disablePerformanceTracking, setGenerationTimeMs,
+    disablePerformanceTracking, setGenerationTimeMs, maq_confirm_opted_in,
     doNotTrack, setDoNotTrack, msDoNotTrack, getValuesFromVisitorIdCookie,
     enableCrossDomainLinking, disableCrossDomainLinking, isCrossDomainLinkingEnabled, setCrossDomainLinkingTimeout, getCrossDomainLinkingUrlParameter,
     addListener, enableLinkTracking, enableJSErrorTracking, setLinkTrackingTimer, getLinkTrackingTimer,
-    enableHeartBeatTimer, disableHeartBeatTimer, killFrame, redirectFile, setCountPreRendered,
+    enableHeartBeatTimer, disableHeartBeatTimer, killFrame, redirectFile, setCountPreRendered, setVisitStandardLength,
     trackGoal, trackLink, trackPageView, getNumTrackedPageViews, trackRequest, ping, queueRequest, trackSiteSearch, trackEvent,
-    requests, timeout, enabled, sendRequests, queueRequest, disableQueueRequest,getRequestQueue, unsetPageIsUnloading,
+    requests, timeout, enabled, sendRequests, queueRequest, canQueue, pushMultiple, disableQueueRequest,setRequestQueueInterval,interval,getRequestQueue, unsetPageIsUnloading,
     setEcommerceView, getEcommerceItems, addEcommerceItem, removeEcommerceItem, clearEcommerceCart, trackEcommerceOrder, trackEcommerceCartUpdate,
     deleteCookie, deleteCookies, offsetTop, offsetLeft, offsetHeight, offsetWidth, nodeType, defaultView,
     innerHTML, scrollLeft, scrollTop, currentStyle, getComputedStyle, querySelectorAll, splice,
@@ -1098,6 +1100,7 @@ if (typeof window.Piwik !== 'object') {
             missedPluginTrackerCalls = [],
 
             coreConsentCounter = 0,
+            coreHeartBeatCounter = 0,
 
             trackerIdCounter = 0,
 
@@ -1154,6 +1157,20 @@ if (typeof window.Piwik !== 'object') {
          */
         function isString(property) {
             return typeof property === 'string' || property instanceof String;
+        }
+
+        /*
+         * Is property a string?
+         */
+        function isNumber(property) {
+            return typeof property === 'number' || property instanceof Number;
+        }
+
+        /*
+         * Is property a string?
+         */
+        function isNumberOrHasLength(property) {
+            return isDefined(property) && (isNumber(property) || (isString(property) && property.length));
         }
 
         function isObjectEmpty(property)
@@ -3017,6 +3034,7 @@ if (typeof window.Piwik !== 'object') {
 
                 // constants
                 CONSENT_COOKIE_NAME = 'mtm_consent',
+                COOKIE_CONSENT_COOKIE_NAME = 'mtm_cookie_consent',
                 CONSENT_REMOVED_COOKIE_NAME = 'mtm_consent_removed',
 
                 // Current URL and Referrer URL
@@ -3090,6 +3108,9 @@ if (typeof window.Piwik !== 'object') {
 
                 // alias to circumvent circular function dependency (JSLint requires this)
                 heartBeatPingIfActivityAlias,
+
+                // the standard visit length as configured in Matomo in "visit_standard_length" config setting
+                configVisitStandardLength = 1800,
 
                 // Disallow hash tags in URL
                 configDiscardHashTag,
@@ -3205,6 +3226,7 @@ if (typeof window.Piwik !== 'object') {
                 // detect this 100% correct for an iframe so whenever Piwik is loaded inside an iframe we presume
                 // the window had focus at least once.
                 hadWindowFocusAtLeastOnce = isInsideAnIframe(),
+                timeWindowLastFocussed = null,
 
                 // Timestamp of last tracker request sent to Piwik
                 lastTrackerRequestTime = null,
@@ -3241,7 +3263,10 @@ if (typeof window.Piwik !== 'object') {
                 consentRequestsQueue = [],
 
                 // a unique ID for this tracker during this request
-                uniqueTrackerId = trackerIdCounter++;
+                uniqueTrackerId = trackerIdCounter++,
+
+                // whether a tracking request has been sent yet during this page view
+                hasSentTrackingRequestYet = false;
 
             // Document title
             try {
@@ -3254,7 +3279,7 @@ if (typeof window.Piwik !== 'object') {
              * Set cookie value
              */
             function setCookie(cookieName, value, msToExpire, path, domain, isSecure) {
-                if (configCookiesDisabled) {
+                if (configCookiesDisabled && cookieName !== CONSENT_REMOVED_COOKIE_NAME) {
                     return;
                 }
 
@@ -3270,7 +3295,8 @@ if (typeof window.Piwik !== 'object') {
                     (msToExpire ? ';expires=' + expiryDate.toGMTString() : '') +
                     ';path=' + (path || '/') +
                     (domain ? ';domain=' + domain : '') +
-                    (isSecure ? ';secure' : '');
+                    (isSecure ? ';secure' : '') +
+                    ';SameSite=Lax';
             }
 
             /*
@@ -3532,6 +3558,15 @@ if (typeof window.Piwik !== 'object') {
                 image.src = configTrackerUrl + (configTrackerUrl.indexOf('?') < 0 ? '?' : '&') + request;
             }
 
+            function shouldForcePost(request)
+            {
+                if (configRequestMethod === 'POST') {
+                    return true;
+                }
+                // we force long single request urls and bulk requests over post
+                return request && (request.length > 2000 || request.indexOf('{"requests"') === 0);
+            }
+
             function supportsSendBeacon()
             {
                 return 'object' === typeof navigatorAlias
@@ -3539,7 +3574,7 @@ if (typeof window.Piwik !== 'object') {
                     && 'function' === typeof Blob;
             }
 
-            function sendPostRequestViaSendBeacon(request, callback)
+            function sendPostRequestViaSendBeacon(request, callback, fallbackToGet)
             {
                 var isSupported = supportsSendBeacon();
 
@@ -3555,7 +3590,7 @@ if (typeof window.Piwik !== 'object') {
                 try {
                     var blob = new Blob([request], headers);
 
-                    if (request.length <= 2000) {
+                    if (fallbackToGet && !shouldForcePost(request)) {
                         blob = new Blob([], headers);
                         url = url + (url.indexOf('?') < 0 ? '?' : '&') + request;
                     }
@@ -3583,7 +3618,7 @@ if (typeof window.Piwik !== 'object') {
                     fallbackToGet = true;
                 }
 
-                if (isPageUnloading && sendPostRequestViaSendBeacon(request, callback)) {
+                if (isPageUnloading && sendPostRequestViaSendBeacon(request, callback, fallbackToGet)) {
                     return;
                 }
 
@@ -3598,7 +3633,7 @@ if (typeof window.Piwik !== 'object') {
                     // same request a second time. To avoid this, we delay the actual execution of this POST request just
                     // by 50ms which gives it usually enough time to detect the unload event in most cases.
 
-                    if (isPageUnloading && sendPostRequestViaSendBeacon(request, callback)) {
+                    if (isPageUnloading && sendPostRequestViaSendBeacon(request, callback, fallbackToGet)) {
                         return;
                     }
                     var sentViaBeacon;
@@ -3618,7 +3653,7 @@ if (typeof window.Piwik !== 'object') {
                         // fallback on error
                         xhr.onreadystatechange = function () {
                             if (this.readyState === 4 && !(this.status >= 200 && this.status < 300)) {
-                                var sentViaBeacon = isPageUnloading && sendPostRequestViaSendBeacon(request, callback);
+                                var sentViaBeacon = isPageUnloading && sendPostRequestViaSendBeacon(request, callback, fallbackToGet);
 
                                 if (!sentViaBeacon && fallbackToGet) {
                                     getImage(request, callback);
@@ -3639,7 +3674,7 @@ if (typeof window.Piwik !== 'object') {
 
                         xhr.send(request);
                     } catch (e) {
-                        sentViaBeacon = isPageUnloading && sendPostRequestViaSendBeacon(request, callback);
+                        sentViaBeacon = isPageUnloading && sendPostRequestViaSendBeacon(request, callback, fallbackToGet);
                         if (!sentViaBeacon && fallbackToGet) {
                             getImage(request, callback);
                         } else if (typeof callback === 'function') {
@@ -3712,17 +3747,21 @@ if (typeof window.Piwik !== 'object') {
 
             function heartBeatOnFocus() {
                 hadWindowFocusAtLeastOnce = true;
+                timeWindowLastFocussed = new Date().getTime();
+            }
 
-                // since it's possible for a user to come back to a tab after several hours or more, we try to send
-                // a ping if the page is active. (after the ping is sent, the heart beat timeout will be set)
-                if (heartBeatPingIfActivityAlias()) {
-                    return;
-                }
-
-                heartBeatUp();
+            function hadWindowMinimalFocusToConsiderViewed() {
+                // we ping on blur or unload only if user was active for more than configHeartBeatDelay seconds on
+                // the page otherwise we can assume user was not really on the page and for example only switching
+                // through tabs
+                var now = new Date().getTime();
+                return !timeWindowLastFocussed || (now - timeWindowLastFocussed) > configHeartBeatDelay;
             }
 
             function heartBeatOnBlur() {
+                if (hadWindowMinimalFocusToConsiderViewed()) {
+                    heartBeatPingIfActivityAlias();
+                }
                 heartBeatDown();
             }
 
@@ -3741,7 +3780,21 @@ if (typeof window.Piwik !== 'object') {
                 addEventListener(windowAlias, 'focus', heartBeatOnFocus);
                 addEventListener(windowAlias, 'blur', heartBeatOnBlur);
 
-                heartBeatUp();
+                // when using multiple trackers then we need to add this event for each tracker
+                coreHeartBeatCounter++;
+                Piwik.addPlugin('HeartBeat' + coreHeartBeatCounter, {
+                    unload: function () {
+                        // we can't remove the unload plugin event when disabling heart beat timer but we at least
+                        // check if it is still enabled... note: when enabling heart beat, then disabling, then
+                        // enabling then this could trigger two requests under circumstances maybe. it's edge case though
+
+                        // we only send the heartbeat if onunload the user spent at least 15seconds since last focus
+                        // or the configured heatbeat timer
+                        if (heartBeatSetUp && hadWindowMinimalFocusToConsiderViewed()) {
+                            heartBeatPingIfActivityAlias();
+                        }
+                    }
+                });
             }
 
             function makeSureThereIsAGapAfterFirstTrackingRequestToPreventMultipleVisitorCreation(callback)
@@ -3775,13 +3828,29 @@ if (typeof window.Piwik !== 'object') {
             }
 
             /*
+             * Check first-party cookies and update the <code>configHasConsent</code> value.  Ensures that any
+             * change to the user opt-in/out status in another browser window will be respected.
+             */
+            function refreshConsentStatus() {
+                if (getCookie(CONSENT_REMOVED_COOKIE_NAME)) {
+                    configHasConsent = false;
+                } else if (getCookie(CONSENT_COOKIE_NAME)) {
+                    configHasConsent = true;
+                }
+            }
+
+            /*
              * Send request
              */
             function sendRequest(request, delay, callback) {
+                refreshConsentStatus();
                 if (!configHasConsent) {
                     consentRequestsQueue.push(request);
                     return;
                 }
+
+                hasSentTrackingRequestYet = true;
+
                 if (!configDoNotTrack && request) {
                     if (configConsentRequired && configHasConsent) { // send a consent=1 when explicit consent is given for the apache logs
                         request += '&consent=1';
@@ -3789,12 +3858,12 @@ if (typeof window.Piwik !== 'object') {
 
                     makeSureThereIsAGapAfterFirstTrackingRequestToPreventMultipleVisitorCreation(function () {
 
-                        if (configAlwaysUseSendBeacon && sendPostRequestViaSendBeacon(request, callback)) {
+                        if (configAlwaysUseSendBeacon && sendPostRequestViaSendBeacon(request, callback, true)) {
                             setExpireDateTime(100);
                             return;
                         }
 
-                        if (configRequestMethod === 'POST' || String(request).length > 2000) {
+                        if (shouldForcePost(request)) {
                             sendXmlHttpRequest(request, callback);
                         } else {
                             getImage(request, callback);
@@ -3805,8 +3874,6 @@ if (typeof window.Piwik !== 'object') {
                 }
                 if (!heartBeatSetUp) {
                     setUpHeartBeat(); // setup window events too, but only once
-                } else {
-                    heartBeatUp();
                 }
             }
 
@@ -3850,13 +3917,21 @@ if (typeof window.Piwik !== 'object') {
                     return;
                 }
 
+                hasSentTrackingRequestYet = true;
+
                 makeSureThereIsAGapAfterFirstTrackingRequestToPreventMultipleVisitorCreation(function () {
                     var chunks = arrayChunk(requests, 50);
 
                     var i = 0, bulk;
                     for (i; i < chunks.length; i++) {
                         bulk = '{"requests":["?' + chunks[i].join('","?') + '"]}';
-                        sendXmlHttpRequest(bulk, null, false);
+                        if (configAlwaysUseSendBeacon && sendPostRequestViaSendBeacon(bulk, null, false)) {
+                            // makes sure to load the next page faster by not waiting as long
+                            // we apply this once we know send beacon works
+                            setExpireDateTime(100);
+                        } else {
+                            sendXmlHttpRequest(bulk, null, false);
+                        }
                     }
 
                     setExpireDateTime(delay);
@@ -3872,6 +3947,10 @@ if (typeof window.Piwik !== 'object') {
                 return configCookieNamePrefix + baseName + '.' + configTrackerSiteId + '.' + domainHash;
             }
 
+            function deleteCookie(cookieName, path, domain) {
+                setCookie(cookieName, '', -86400, path, domain);
+            }
+
             /*
              * Does browser have cookies enabled (for this site)?
              */
@@ -3880,14 +3959,17 @@ if (typeof window.Piwik !== 'object') {
                     return '0';
                 }
 
-                if (!isDefined(navigatorAlias.cookieEnabled)) {
-                    var testCookieName = getCookieName('testcookie');
-                    setCookie(testCookieName, '1');
-
-                    return getCookie(testCookieName) === '1' ? '1' : '0';
+                if(!isDefined(windowAlias.showModalDialog) && isDefined(navigatorAlias.cookieEnabled)) {
+                    return navigatorAlias.cookieEnabled ? '1' : '0';
                 }
 
-                return navigatorAlias.cookieEnabled ? '1' : '0';
+                // for IE we want to actually set the cookie to avoid trigger a warning eg in IE see #11507
+                var testCookieName = configCookieNamePrefix + 'testcookie';
+                setCookie(testCookieName, '1', undefined, configCookiePath, configCookieDomain, configCookieIsSecure);
+
+                var hasCookie = getCookie(testCookieName) === '1' ? '1' : '0';
+                deleteCookie(testCookieName);
+                return hasCookie;
             }
 
             /*
@@ -3895,6 +3977,75 @@ if (typeof window.Piwik !== 'object') {
              */
             function updateDomainHash() {
                 domainHash = hash((configCookieDomain || domainAlias) + (configCookiePath || '/')).slice(0, 4); // 4 hexits = 16 bits
+            }
+
+            /*
+             * Browser features (plugins, resolution, cookies)
+             */
+            function detectBrowserFeatures() {
+                if (isDefined(browserFeatures.res)) {
+                    return browserFeatures;
+                }
+                var i,
+                    mimeType,
+                    pluginMap = {
+                        // document types
+                        pdf: 'application/pdf',
+
+                        // media players
+                        qt: 'video/quicktime',
+                        realp: 'audio/x-pn-realaudio-plugin',
+                        wma: 'application/x-mplayer2',
+
+                        // interactive multimedia
+                        dir: 'application/x-director',
+                        fla: 'application/x-shockwave-flash',
+
+                        // RIA
+                        java: 'application/x-java-vm',
+                        gears: 'application/x-googlegears',
+                        ag: 'application/x-silverlight'
+                    };
+
+                // detect browser features except IE < 11 (IE 11 user agent is no longer MSIE)
+                if (!((new RegExp('MSIE')).test(navigatorAlias.userAgent))) {
+                    // general plugin detection
+                    if (navigatorAlias.mimeTypes && navigatorAlias.mimeTypes.length) {
+                        for (i in pluginMap) {
+                            if (Object.prototype.hasOwnProperty.call(pluginMap, i)) {
+                                mimeType = navigatorAlias.mimeTypes[pluginMap[i]];
+                                browserFeatures[i] = (mimeType && mimeType.enabledPlugin) ? '1' : '0';
+                            }
+                        }
+                    }
+
+                    // Safari and Opera
+                    // IE6/IE7 navigator.javaEnabled can't be aliased, so test directly
+                    // on Edge navigator.javaEnabled() always returns `true`, so ignore it
+                    if (!((new RegExp('Edge[ /](\\d+[\\.\\d]+)')).test(navigatorAlias.userAgent)) &&
+                        typeof navigator.javaEnabled !== 'unknown' &&
+                        isDefined(navigatorAlias.javaEnabled) &&
+                        navigatorAlias.javaEnabled()) {
+                        browserFeatures.java = '1';
+                    }
+
+                    // Firefox
+                    if (isFunction(windowAlias.GearsFactory)) {
+                        browserFeatures.gears = '1';
+                    }
+                    
+                    if (!isDefined(windowAlias.showModalDialog) && isDefined(navigatorAlias.cookieEnabled)) {
+                        browserFeatures.cookie = navigatorAlias.cookieEnabled ? '1' : '0';
+                    } else {
+                        // Eg IE11 ... prevent error when cookieEnabled is requested within modal dialog. see #11507
+                        browserFeatures.cookie = hasCookies();
+                    }
+                }
+
+                var width = parseInt(screenAlias.width, 10);
+                var height = parseInt(screenAlias.height, 10);
+                browserFeatures.res = parseInt(width, 10) + 'x' + parseInt(height, 10);
+                return browserFeatures;
             }
 
             /*
@@ -3930,6 +4081,7 @@ if (typeof window.Piwik !== 'object') {
              * note: this isn't a RFC4122-compliant UUID
              */
             function generateRandomUuid() {
+                var browserFeatures = detectBrowserFeatures();
                 return hash(
                     (navigatorAlias.userAgent || '') +
                     (navigatorAlias.platform || '') +
@@ -3940,6 +4092,8 @@ if (typeof window.Piwik !== 'object') {
             }
 
             function generateBrowserSpecificId() {
+                var browserFeatures = detectBrowserFeatures();
+
                 return hash(
                     (navigatorAlias.userAgent || '') +
                     (navigatorAlias.platform || '') +
@@ -4186,10 +4340,6 @@ if (typeof window.Piwik !== 'object') {
                 ];
             }
 
-            function deleteCookie(cookieName, path, domain) {
-                setCookie(cookieName, '', -86400, path, domain);
-            }
-
             function isPossibleToSetCookieOnDomain(domainToTest)
             {
                 var valueToSet = 'testvalue';
@@ -4224,7 +4374,6 @@ if (typeof window.Piwik !== 'object') {
 
             function setSiteId(siteId) {
                 configTrackerSiteId = siteId;
-                setVisitorIdCookie();
             }
 
             function sortObjectByKeys(value) {
@@ -4413,6 +4562,7 @@ if (typeof window.Piwik !== 'object') {
                     (charSet ? '&cs=' + encodeWrapper(charSet) : '') +
                     '&send_image=0';
 
+                var browserFeatures = detectBrowserFeatures();
                 // browser features
                 for (i in browserFeatures) {
                     if (Object.prototype.hasOwnProperty.call(browserFeatures, i)) {
@@ -4527,7 +4677,18 @@ if (typeof window.Piwik !== 'object') {
              */
             heartBeatPingIfActivityAlias = function heartBeatPingIfActivity() {
                 var now = new Date();
-                if (lastTrackerRequestTime + configHeartBeatDelay <= now.getTime()) {
+                now = now.getTime();
+
+                if (!lastTrackerRequestTime) {
+                    return false; // no tracking request was ever sent so lets not send heartbeat now
+                }
+                if ((lastTrackerRequestTime + (1000*configVisitStandardLength)) <= now) {
+                    // heart beat does not extend the visit length and therefore there is pretty much no point
+                    // to send requests after this
+                    return false;
+                }
+
+                if (lastTrackerRequestTime + configHeartBeatDelay <= now) {
                     trackerInstance.ping();
 
                     return true;
@@ -4635,7 +4796,7 @@ if (typeof window.Piwik !== 'object') {
              */
             function getClassesRegExp(configClasses, defaultClass) {
                 var i,
-                    classesRegExp = '(^| )(piwik[_-]' + defaultClass;
+                    classesRegExp = '(^| )(piwik[_-]' + defaultClass + '|matomo[_-]' + defaultClass;
 
                 if (configClasses) {
                     for (i = 0; i < configClasses.length; i++) {
@@ -5569,67 +5730,6 @@ if (typeof window.Piwik !== 'object') {
                 });
             }
 
-            /*
-             * Browser features (plugins, resolution, cookies)
-             */
-            function detectBrowserFeatures() {
-                var i,
-                    mimeType,
-                    pluginMap = {
-                        // document types
-                        pdf: 'application/pdf',
-
-                        // media players
-                        qt: 'video/quicktime',
-                        realp: 'audio/x-pn-realaudio-plugin',
-                        wma: 'application/x-mplayer2',
-
-                        // interactive multimedia
-                        dir: 'application/x-director',
-                        fla: 'application/x-shockwave-flash',
-
-                        // RIA
-                        java: 'application/x-java-vm',
-                        gears: 'application/x-googlegears',
-                        ag: 'application/x-silverlight'
-                    };
-
-                // detect browser features except IE < 11 (IE 11 user agent is no longer MSIE)
-                if (!((new RegExp('MSIE')).test(navigatorAlias.userAgent))) {
-                    // general plugin detection
-                    if (navigatorAlias.mimeTypes && navigatorAlias.mimeTypes.length) {
-                        for (i in pluginMap) {
-                            if (Object.prototype.hasOwnProperty.call(pluginMap, i)) {
-                                mimeType = navigatorAlias.mimeTypes[pluginMap[i]];
-                                browserFeatures[i] = (mimeType && mimeType.enabledPlugin) ? '1' : '0';
-                            }
-                        }
-                    }
-
-                    // Safari and Opera
-                    // IE6/IE7 navigator.javaEnabled can't be aliased, so test directly
-                    // on Edge navigator.javaEnabled() always returns `true`, so ignore it
-                    if (!((new RegExp('Edge[ /](\\d+[\\.\\d]+)')).test(navigatorAlias.userAgent)) &&
-                        typeof navigator.javaEnabled !== 'unknown' &&
-                        isDefined(navigatorAlias.javaEnabled) &&
-                        navigatorAlias.javaEnabled()) {
-                        browserFeatures.java = '1';
-                    }
-
-                    // Firefox
-                    if (isFunction(windowAlias.GearsFactory)) {
-                        browserFeatures.gears = '1';
-                    }
-
-                    // other browser features
-                    browserFeatures.cookie = hasCookies();
-                }
-
-                var width = parseInt(screenAlias.width, 10);
-                var height = parseInt(screenAlias.height, 10);
-                browserFeatures.res = parseInt(width, 10) + 'x' + parseInt(height, 10);
-            }
-
             /*<DEBUG>*/
             /*
              * Register a test hook. Using eval() permits access to otherwise
@@ -5659,6 +5759,7 @@ if (typeof window.Piwik !== 'object') {
                 enabled: true,
                 requests: [],
                 timeout: null,
+                interval: 2500,
                 sendRequests: function () {
                     var requestsToTrack = this.requests;
                     this.requests = [];
@@ -5668,11 +5769,25 @@ if (typeof window.Piwik !== 'object') {
                         sendBulkRequest(requestsToTrack, configTrackerPause);
                     }
                 },
+                canQueue: function () {
+                    return !isPageUnloading && this.enabled;
+                },
+                pushMultiple: function (requests) {
+                    if (!this.canQueue()) {
+                        sendBulkRequest(requests, configTrackerPause);
+                        return;
+                    }
+
+                    var i;
+                    for (i = 0; i < requests.length; i++) {
+                        this.push(requests[i]);
+                    }
+                },
                 push: function (requestUrl) {
                     if (!requestUrl) {
                         return;
                     }
-                    if (isPageUnloading || !this.enabled) {
+                    if (!this.canQueue()) {
                         // we don't queue as we need to ensure the request will be sent when the page is unloading...
                         sendRequest(requestUrl, configTrackerPause);
                         return;
@@ -5684,11 +5799,11 @@ if (typeof window.Piwik !== 'object') {
                         clearTimeout(this.timeout);
                         this.timeout = null;
                     }
-                    // we always extend by another 1.75 seconds after receiving a tracking request
+                    // we always extend by another 2.5 seconds after receiving a tracking request
                     this.timeout = setTimeout(function () {
                         requestQueue.timeout = null;
                         requestQueue.sendRequests();
-                    }, 1750);
+                    }, requestQueue.interval);
 
                     var trackerQueueId = 'RequestQueue' + uniqueTrackerId;
                     if (!Object.prototype.hasOwnProperty.call(plugins, trackerQueueId)) {
@@ -5713,7 +5828,6 @@ if (typeof window.Piwik !== 'object') {
             /*
              * initialize tracker
              */
-            detectBrowserFeatures();
             updateDomainHash();
             setVisitorIdCookie();
 
@@ -5742,9 +5856,6 @@ if (typeof window.Piwik !== 'object') {
             };
             this.getContent = function () {
                 return content;
-            };
-            this.setVisitorId = function (visitorId) {
-                visitorUUID = visitorId;
             };
 
             this.buildContentImpressionRequest = buildContentImpressionRequest;
@@ -5804,11 +5915,11 @@ if (typeof window.Piwik !== 'object') {
             this.unsetPageIsUnloading = function () {
                 isPageUnloading = false;
             };
+            this.getRemainingVisitorCookieTimeout = getRemainingVisitorCookieTimeout;
+            /*</DEBUG>*/
             this.hasConsent = function () {
                 return configHasConsent;
             };
-            this.getRemainingVisitorCookieTimeout = getRemainingVisitorCookieTimeout;
-            /*</DEBUG>*/
 
             /**
              * Get visitor ID (from first party cookie)
@@ -5916,10 +6027,6 @@ if (typeof window.Piwik !== 'object') {
              * @return Tracker
              */
             this.addTracker = function (piwikUrl, siteId) {
-                if (!siteId) {
-                    throw new Error('A siteId must be given to add a new tracker');
-                }
-
                 if (!isDefined(piwikUrl) || null === piwikUrl) {
                     piwikUrl = this.getTrackerUrl();
                 }
@@ -5952,7 +6059,7 @@ if (typeof window.Piwik !== 'object') {
             };
 
             /**
-             * Clears the User ID and generates a new visitor id.
+             * Clears the User ID
              */
             this.resetUserId = function() {
                 configUserId = '';
@@ -5964,10 +6071,25 @@ if (typeof window.Piwik !== 'object') {
              * @param string User ID
              */
             this.setUserId = function (userId) {
-                if(!isDefined(userId) || !userId.length) {
-                    return;
+                if (isNumberOrHasLength(userId)) {
+                    configUserId = userId;
                 }
-                configUserId = userId;
+            };
+
+            /**
+             * Sets a Visitor ID to this visitor. Should be a 16 digit hex string.
+             * The visitorId won't be persisted in a cookie or something similar and needs to be set every time.
+             *
+             * @param string User ID
+             */
+            this.setVisitorId = function (visitorId) {
+                var validation = /[0-9A-Fa-f]{16}/g;
+
+                if (isString(visitorId) && validation.test(visitorId)) {
+                    visitorUUID = visitorId;
+                } else {
+                    logConsoleError('Invalid visitorId set' + visitorId);
+                }
             };
 
             /**
@@ -6676,11 +6798,119 @@ if (typeof window.Piwik !== 'object') {
              */
             this.disableCookies = function () {
                 configCookiesDisabled = true;
-                browserFeatures.cookie = '0';
 
                 if (configTrackerSiteId) {
                     deleteCookies();
                 }
+            };
+
+            /**
+             * Detects if cookies are enabled or not
+             * @returns {boolean}
+             */
+            this.areCookiesEnabled = function () {
+                return !configCookiesDisabled;
+            };
+
+            /**
+             * Enables cookies if they were disabled previously.
+             */
+            this.setCookieConsentGiven = function () {
+                if (configCookiesDisabled && !configDoNotTrack) {
+                    configCookiesDisabled = false;
+                    if (configTrackerSiteId && hasSentTrackingRequestYet) {
+                        setVisitorIdCookie();
+
+                        // sets attribution cookie, and updates visitorId in the backend
+                        // because hasSentTrackingRequestYet=true we assume there might not be another tracking
+                        // request within this page view so we trigger one ourselves.
+                        // if no tracking request has been sent yet, we don't set the attribution cookie cause Matomo
+                        // sets the cookie only when there is a tracking request. It'll be set if the user sends
+                        // a tracking request afterwards
+                        var request = getRequest('ping=1', null, 'ping');
+                        sendRequest(request, configTrackerPause);
+                    }
+                }
+            };
+
+            /**
+             * When called, no cookies will be set until you have called `setCookieConsentGiven()`
+             * unless consent was given previously AND you called {@link rememberCookieConsentGiven()} when the user
+             * gave consent.
+             *
+             * This may be useful when you want to implement for example a popup to ask for cookie consent.
+             * Once the user has given consent, you should call {@link setCookieConsentGiven()}
+             * or {@link rememberCookieConsentGiven()}.
+             *
+             * If you require tracking consent for example because you are tracking personal data and GDPR applies to you,
+             * then have a look at `_paq.push(['requireConsent'])` instead.
+             *
+             * If the user has already given consent in the past, you can either decide to not call `requireCookieConsent` at all
+             * or call `_paq.push(['setCookieConsentGiven'])` on each page view at any time after calling `requireCookieConsent`.
+             *
+             * When the user gives you the consent to set cookies, you can also call `_paq.push(['rememberCookieConsentGiven', optionalTimeoutInHours])`
+             * and for the duration while the cookie consent is remembered, any call to `requireCoookieConsent` will be automatically ignored
+             * until you call `forgetCookieConsentGiven`.
+             * `forgetCookieConsentGiven` needs to be called when the user removes consent for using cookies. This means if you call `rememberCookieConsentGiven` at the
+             * time the user gives you consent, you do not need to ever call `_paq.push(['setCookieConsentGiven'])` as the consent
+             * will be detected automatically through cookies.
+             */
+            this.requireCookieConsent = function() {
+                if (this.getRememberedCookieConsent()) {
+                    return false;
+                }
+                this.disableCookies();
+                return true;
+            };
+
+            /**
+             * If the user has given cookie consent previously and this consent was remembered, it will return the number
+             * in milliseconds since 1970/01/01 which is the date when the user has given cookie consent. Please note that
+             * the returned time depends on the users local time which may not always be correct.
+             *
+             * @returns number|string
+             */
+            this.getRememberedCookieConsent = function () {
+                return getCookie(COOKIE_CONSENT_COOKIE_NAME);
+            };
+
+            /**
+             * Calling this method will remove any previously given cookie consent and it disables cookies for subsequent
+             * page views. You may call this method if the user removes cookie consent manually, or if you
+             * want to re-ask for cookie consent after a specific time period.
+             */
+            this.forgetCookieConsentGiven = function () {
+                deleteCookie(COOKIE_CONSENT_COOKIE_NAME, configCookiePath, configCookieDomain);
+                this.disableCookies();
+            };
+
+            /**
+             * Calling this method will remember that the user has given cookie consent across multiple requests by setting
+             * a cookie named "mtm_cookie_consent". You can optionally define the lifetime of that cookie in hours
+             * using a parameter.
+             *
+             * When you call this method, we imply that the user has given cookie consent for this page view, and will also
+             * imply consent for all future page views unless the cookie expires or the user
+             * deletes all her or his cookies. Remembering cookie consent means even if you call {@link disableCookies()},
+             * then cookies will still be enabled and it won't disable cookies since the user has given consent for cookies.
+             *
+             * Please note that this feature requires you to set the `cookieDomain` and `cookiePath` correctly. Please
+             * also note that when you call this method, consent will be implied for all sites that match the configured
+             * cookieDomain and cookiePath. Depending on your website structure, you may need to restrict or widen the
+             * scope of the cookie domain/path to ensure the consent is applied to the sites you want.
+             *
+             * @param int hoursToExpire After how many hours the cookie consent should expire. By default the consent is valid
+             *                          for 30 years unless cookies are deleted by the user or the browser prior to this
+             */
+            this.rememberCookieConsentGiven = function (hoursToExpire) {
+                if (hoursToExpire) {
+                    hoursToExpire = hoursToExpire * 60 * 60 * 1000;
+                } else {
+                    hoursToExpire = 30 * 365 * 24 * 60 * 60 * 1000;
+                }
+                this.setCookieConsentGiven();
+                var now = new Date().getTime();
+                setCookie(COOKIE_CONSENT_COOKIE_NAME, now, hoursToExpire, configCookiePath, configCookieDomain, configCookieIsSecure);
             };
 
             /**
@@ -6765,6 +6995,9 @@ if (typeof window.Piwik !== 'object') {
                     trackCallbackOnReady(function () {
                         addClickListeners(enable, self);
                     });
+                    trackCallbackOnLoad(function () {
+                        addClickListeners(enable, self);
+                    });
                 });
             };
 
@@ -6831,12 +7064,24 @@ if (typeof window.Piwik !== 'object') {
             };
 
             /**
+             * Set visit standard length (in seconds). This should ideally match the visit_standard_length setting
+             * in Matomo in case you customised it. This setting only has an effect if heart beat timer is active
+             * currently.
+             *
+             * @param int visitStandardLengthinSeconds Defaults to 1800s (30 minutes). Cannot be lower than 5.
+             */
+            this.setVisitStandardLength = function (visitStandardLengthinSeconds) {
+                visitStandardLengthinSeconds = Math.max(visitStandardLengthinSeconds, 5);
+                configVisitStandardLength = visitStandardLengthinSeconds;
+            };
+
+            /**
              * Set heartbeat (in seconds)
              *
-             * @param int heartBeatDelayInSeconds Defaults to 15. Cannot be lower than 1.
+             * @param int heartBeatDelayInSeconds Defaults to 15s. Cannot be lower than 5.
              */
             this.enableHeartBeatTimer = function (heartBeatDelayInSeconds) {
-                heartBeatDelayInSeconds = Math.max(heartBeatDelayInSeconds, 1);
+                heartBeatDelayInSeconds = Math.max(heartBeatDelayInSeconds, 5);
                 configHeartBeatDelay = (heartBeatDelayInSeconds || 15) * 1000;
 
                 // if a tracking request has already been sent, start the heart beat timeout
@@ -6971,7 +7216,7 @@ if (typeof window.Piwik !== 'object') {
                         var contentNodes = content.findContentNodes();
                         var requests     = getContentImpressionsRequestsFromNodes(contentNodes);
 
-                        sendBulkRequest(requests, configTrackerPause);
+                        requestQueue.pushMultiple(requests);
                     });
                 });
             };
@@ -7031,7 +7276,7 @@ if (typeof window.Piwik !== 'object') {
                         var contentNodes = content.findContentNodes();
                         var requests     = getCurrentlyVisibleContentImpressionsRequestsIfNotTrackedYet(contentNodes);
 
-                        sendBulkRequest(requests, configTrackerPause);
+                        requestQueue.pushMultiple(requests);
                     });
                 });
             };
@@ -7061,7 +7306,7 @@ if (typeof window.Piwik !== 'object') {
 
                 trackCallback(function () {
                     var request = buildContentImpressionRequest(contentName, contentPiece, contentTarget);
-                    sendRequest(request, configTrackerPause);
+                    requestQueue.push(request);
                 });
             };
 
@@ -7085,7 +7330,7 @@ if (typeof window.Piwik !== 'object') {
                             var contentNodes = content.findContentNodesWithinNode(domNode);
 
                             var requests = getCurrentlyVisibleContentImpressionsRequestsIfNotTrackedYet(contentNodes);
-                            sendBulkRequest(requests, configTrackerPause);
+                            requestQueue.pushMultiple(requests);
                         });
                     } else {
                         trackCallbackOnReady(function () {
@@ -7093,7 +7338,7 @@ if (typeof window.Piwik !== 'object') {
                             var contentNodes = content.findContentNodesWithinNode(domNode);
 
                             var requests = getContentImpressionsRequestsFromNodes(contentNodes);
-                            sendBulkRequest(requests, configTrackerPause);
+                            requestQueue.pushMultiple(requests);
                         });
                     }
                 });
@@ -7128,7 +7373,7 @@ if (typeof window.Piwik !== 'object') {
                 trackCallback(function () {
                     var request = buildContentInteractionRequest(contentInteraction, contentName, contentPiece, contentTarget);
                     if (request) {
-                        sendRequest(request, configTrackerPause);
+                        requestQueue.push(request);
                     }
                 });
             };
@@ -7155,7 +7400,7 @@ if (typeof window.Piwik !== 'object') {
                 trackCallback(function () {
                     var request = buildContentInteractionRequestNode(domNode, contentInteraction);
                     if (request) {
-                        sendRequest(request, configTrackerPause);
+                        requestQueue.push(request);
                     }
                 });
             };
@@ -7224,7 +7469,10 @@ if (typeof window.Piwik !== 'object') {
              * @param float price Item's display price, not use in standard Piwik reports, but output in API product reports.
              */
             this.setEcommerceView = function (sku, name, category, price) {
-                if (!isDefined(category) || !category.length) {
+                if (isNumberOrHasLength(category)) {
+                    category = String(category);
+                }
+                if (!isDefined(category) || category === null || category === false || !category.length) {
                     category = "";
                 } else if (category instanceof Array) {
                     category = JSON_PIWIK.stringify(category);
@@ -7232,21 +7480,20 @@ if (typeof window.Piwik !== 'object') {
 
                 customVariablesPage[5] = ['_pkc', category];
 
-                if (isDefined(price) && String(price).length) {
+                if (isDefined(price) && price !== null && price !== false && String(price).length) {
                     customVariablesPage[2] = ['_pkp', price];
                 }
 
                 // On a category page, do not track Product name not defined
-                if ((!isDefined(sku) || !sku.length)
-                    && (!isDefined(name) || !name.length)) {
+                if (!isNumberOrHasLength(sku) && !isNumberOrHasLength(name)) {
                     return;
                 }
 
-                if (isDefined(sku) && sku.length) {
+                if (isNumberOrHasLength(sku)) {
                     customVariablesPage[3] = ['_pks', sku];
                 }
 
-                if (!isDefined(name) || !name.length) {
+                if (!isNumberOrHasLength(name)) {
                     name = "";
                 }
 
@@ -7282,8 +7529,8 @@ if (typeof window.Piwik !== 'object') {
              * @param float quantity (optional) Item's quantity. If not specified, will default to 1
              */
             this.addEcommerceItem = function (sku, name, category, price, quantity) {
-                if (sku.length) {
-                    ecommerceItems[sku] = [ sku, name, category, price, quantity ];
+                if (isNumberOrHasLength(sku)) {
+                    ecommerceItems[sku] = [ String(sku), name, category, price, quantity ];
                 }
             };
 
@@ -7293,7 +7540,8 @@ if (typeof window.Piwik !== 'object') {
              * @param string sku (required) Item's SKU Code. This is the unique identifier for the product.
              */
             this.removeEcommerceItem = function (sku) {
-                if (sku.length) {
+                if (isNumberOrHasLength(sku)) {
+                    sku = String(sku);
                     delete ecommerceItems[sku];
                 }
             };
@@ -7374,6 +7622,17 @@ if (typeof window.Piwik !== 'object') {
             };
 
             /**
+             * Defines after how many ms a queued requests will be executed after the request was queued initially.
+             * The higher the value the more tracking requests can be send together at once.
+             */
+            this.setRequestQueueInterval = function (interval) {
+                if (interval < 1000) {
+                    throw new Error('Request queue interval needs to be at least 1000ms');
+                }
+                requestQueue.interval = interval;
+            };
+
+            /**
              * Won't send the tracking request directly but wait for a short time to possibly send this tracking request
              * along with other tracking requests in one go. This can reduce the number of requests send to your server.
              * If the page unloads (user navigates to another page or closes the browser), then all remaining queued
@@ -7388,6 +7647,16 @@ if (typeof window.Piwik !== 'object') {
                     var fullRequest = getRequest(request);
                     requestQueue.push(fullRequest);
                 });
+            };
+
+            /**
+             * Returns whether consent is required or not.
+             *
+             * @returns boolean
+             */
+            this.isConsentRequired = function()
+            {
+                return configConsentRequired;
             };
 
             /**
@@ -7432,10 +7701,6 @@ if (typeof window.Piwik !== 'object') {
              * This may be useful when you want to implement for example a popup to ask for consent before tracking the user.
              * Once the user has given consent, you should call {@link setConsentGiven()} or {@link rememberConsentGiven()}.
              *
-             * Please note that when consent is required, we will temporarily set cookies but not track any data. Those
-             * cookies will only exist during this page view and deleted as soon as the user navigates to a different page
-             * or closes the browser.
-             *
              * If you require consent for tracking personal data for example, you should first call
              * `_paq.push(['requireConsent'])`.
              *
@@ -7450,6 +7715,11 @@ if (typeof window.Piwik !== 'object') {
             this.requireConsent = function () {
                 configConsentRequired = true;
                 configHasConsent = this.hasRememberedConsent();
+                if (!configHasConsent) {
+                    // we won't call this.disableCookies() since we don't want to delete any cookies just yet
+                    // user might call `setConsentGiven` next
+                    configCookiesDisabled = true;
+                }
                 // Piwik.addPlugin might not be defined at this point, we add the plugin directly also to make JSLint happy
                 // We also want to make sure to define an unload listener for each tracker, not only one tracker.
                 coreConsentCounter++;
@@ -7467,10 +7737,16 @@ if (typeof window.Piwik !== 'object') {
              * Call this method once the user has given consent. This will cause all tracking requests from this
              * page view to be sent. Please note that the given consent won't be remembered across page views. If you
              * want to remember consent across page views, call {@link rememberConsentGiven()} instead.
+             *
+             * It will also automatically enable cookies if they were disabled previously.
+             *
+             * @param bool [setCookieConsent=true] Internal parameter. Defines whether cookies should be enabled or not.
              */
-            this.setConsentGiven = function () {
+            this.setConsentGiven = function (setCookieConsent) {
                 configHasConsent = true;
+
                 deleteCookie(CONSENT_REMOVED_COOKIE_NAME, configCookiePath, configCookieDomain);
+
                 var i, requestType;
                 for (i = 0; i < consentRequestsQueue.length; i++) {
                     requestType = typeof consentRequestsQueue[i];
@@ -7481,11 +7757,23 @@ if (typeof window.Piwik !== 'object') {
                     }
                 }
                 consentRequestsQueue = [];
+
+                // we need to enable cookies after sending the previous requests as it will make sure that we send
+                // a ping request if needed. Cookies are only set once we call `getRequest`. Above only calls sendRequest
+                // meaning no cookies will be created unless we called enableCookies after at least one request has been sent.
+                // this will cause a ping request to be sent that sets the cookies and also updates the newly generated visitorId
+                // on the server.
+                // If the user calls setConsentGiven before sending any tracking request (which usually is the case) then
+                // nothing will need to be done as it only enables cookies and the next tracking request will set the cookies
+                // etc.
+                if (!isDefined(setCookieConsent) || setCookieConsent) {
+                    this.setCookieConsentGiven();
+                }
             };
 
             /**
              * Calling this method will remember that the user has given consent across multiple requests by setting
-             * a cookie. You can optionally define the lifetime of that cookie in milliseconds using a parameter.
+             * a cookie. You can optionally define the lifetime of that cookie in hours using a parameter.
              *
              * When you call this method, we imply that the user has given consent for this page view, and will also
              * imply consent for all future page views unless the cookie expires (if timeout defined) or the user
@@ -7497,16 +7785,20 @@ if (typeof window.Piwik !== 'object') {
              * for all sites that match the configured cookieDomain and cookiePath. Depending on your website structure,
              * you may need to restrict or widen the scope of the cookie domain/path to ensure the consent is applied
              * to the sites you want.
+             *
+             * @param int hoursToExpire After how many hours the consent should expire. By default the consent is valid
+             *                          for 30 years unless cookies are deleted by the user or the browser prior to this
              */
             this.rememberConsentGiven = function (hoursToExpire) {
-                if (configCookiesDisabled) {
-                    logConsoleError('rememberConsentGiven is called but cookies are disabled, consent will not be remembered');
-                    return;
-                }
                 if (hoursToExpire) {
                     hoursToExpire = hoursToExpire * 60 * 60 * 1000;
+                } else {
+                    hoursToExpire = 30 * 365 * 24 * 60 * 60 * 1000;
                 }
-                this.setConsentGiven();
+                var setCookieConsent = true;
+                // we currently always enable cookies if we remember consent cause we don't store across requests whether
+                // cookies should be automatically enabled or not.
+                this.setConsentGiven(setCookieConsent);
                 var now = new Date().getTime();
                 setCookie(CONSENT_COOKIE_NAME, now, hoursToExpire, configCookiePath, configCookieDomain, configCookieIsSecure);
             };
@@ -7518,15 +7810,11 @@ if (typeof window.Piwik !== 'object') {
              * want to re-ask for consent after a specific time period.
              */
             this.forgetConsentGiven = function () {
-                if (configCookiesDisabled) {
-                    logConsoleError('forgetConsentGiven is called but cookies are disabled, consent will not be forgotten');
-                    return;
-                }
-
                 var thirtyYears = 30 * 365 * 24 * 60 * 60 * 1000;
 
                 deleteCookie(CONSENT_COOKIE_NAME, configCookiePath, configCookieDomain);
                 setCookie(CONSENT_REMOVED_COOKIE_NAME, new Date().getTime(), thirtyYears, configCookiePath, configCookieDomain, configCookieIsSecure);
+                this.forgetCookieConsentGiven();
                 this.requireConsent();
             };
 
@@ -7548,7 +7836,11 @@ if (typeof window.Piwik !== 'object') {
             /**
              * Alias for rememberConsentGiven(). After calling this function, the current user will be tracked.
              */
-            this.forgetUserOptOut = this.rememberConsentGiven;
+            this.forgetUserOptOut = function () {
+                // we can't automatically enable cookies here as we don't know if user actually gave consent for cookies
+                var setCookieConsent = false;
+                this.rememberConsentGiven(0, setCookieConsent);
+            };
 
             Piwik.trigger('TrackerSetup', [this]);
         }
@@ -7602,7 +7894,7 @@ if (typeof window.Piwik !== 'object') {
          * Constructor
          ************************************************************/
 
-        var applyFirst = ['addTracker', 'disableCookies', 'setTrackerUrl', 'setAPIUrl', 'enableCrossDomainLinking', 'setCrossDomainLinkingTimeout', 'setSessionCookieTimeout', 'setSecureCookie', 'setCookiePath', 'setCookieDomain', 'setDomains', 'setUserId', 'setSiteId', 'alwaysUseSendBeacon', 'enableLinkTracking', 'requireConsent', 'setConsentGiven'];
+        var applyFirst = ['addTracker', 'forgetCookieConsentGiven', 'requireCookieConsent', 'disableCookies', 'setTrackerUrl', 'setAPIUrl', 'enableCrossDomainLinking', 'setCrossDomainLinkingTimeout', 'setSessionCookieTimeout', 'setVisitorCookieTimeout', 'setSecureCookie', 'setCookiePath', 'setCookieDomain', 'setDomains', 'setUserId', 'setVisitorId', 'setSiteId', 'alwaysUseSendBeacon', 'enableLinkTracking', 'setCookieConsentGiven', 'requireConsent', 'setConsentGiven'];
 
         function createFirstTracker(piwikUrl, siteId)
         {
@@ -7634,6 +7926,91 @@ if (typeof window.Piwik !== 'object') {
 
         // initialize the Piwik singleton
         addEventListener(windowAlias, 'beforeunload', beforeUnloadHandler, false);
+
+        addEventListener(windowAlias,'message', function(e) {
+            if (!e || !e.origin) {
+                return;
+            }
+
+            var tracker, i, matomoHost;
+            var originHost = getHostName(e.origin);
+
+            var trackers = Piwik.getAsyncTrackers();
+            for (i = 0; i < trackers.length; i++) {
+                matomoHost = getHostName(trackers[i].getPiwikUrl());
+
+                // find the matching tracker
+                if (matomoHost === originHost) {
+                    tracker = trackers[i];
+                    break;
+                }
+            }
+
+            if (!tracker) {
+                // no matching tracker
+                // Don't accept the message unless it came from the expected origin
+                return;
+            }
+
+            var data = null;
+            try {
+                data = JSON.parse(e.data);
+            } catch (ex) {
+                return;
+            }
+
+            if (!data) {
+                return;
+            }
+
+            function postMessageToCorrectFrame(postMessage){
+                // Find the iframe with the right URL to send it back to
+                var iframes = documentAlias.getElementsByTagName('iframe');
+                for (i = 0; i < iframes.length; i++) {
+                    var iframe = iframes[i];
+                    var iframeHost = getHostName(iframe.src);
+
+                    if (iframe.contentWindow && isDefined(iframe.contentWindow.postMessage) && iframeHost === originHost) {
+                        var jsonMessage = JSON.stringify(postMessage);
+                        iframe.contentWindow.postMessage(jsonMessage, '*');
+                    }
+                }
+            }
+
+            // This listener can process two kinds of messages
+            // 1) maq_initial_value => sent by optout iframe when it finishes loading.  Passes the value of the third
+            // party opt-out cookie (if set) - we need to use this and any first-party cookies that are present to
+            // initialise the configHasConsent value and send back the result so that the display can be updated.
+            // 2) maq_opted_in => sent by optout iframe when the user changes their optout setting.  We need to update
+            // our first-party cookie.
+            if (isDefined(data.maq_initial_value)) {
+                // Make a message to tell the optout iframe about the current state
+
+                postMessageToCorrectFrame({
+                    maq_opted_in: data.maq_initial_value && tracker.hasConsent(),
+                    maq_url: tracker.getPiwikUrl(),
+                    maq_optout_by_default: tracker.isConsentRequired()
+                });
+            } else if (isDefined(data.maq_opted_in)) {
+                // perform the opt in or opt out...
+                trackers = Piwik.getAsyncTrackers();
+                for (i = 0; i < trackers.length; i++) {
+                    tracker = trackers[i];
+                    if (data.maq_opted_in) {
+                        tracker.rememberConsentGiven();
+                    } else {
+                        tracker.forgetConsentGiven();
+                    }
+                }
+
+                // Make a message to tell the optout iframe about the current state
+                postMessageToCorrectFrame({
+                    maq_confirm_opted_in: tracker.hasConsent(),
+                    maq_url: tracker.getPiwikUrl(),
+                    maq_optout_by_default: tracker.isConsentRequired()
+                });
+            }
+        }, false);
 
         Date.prototype.getTimeAlias = Date.prototype.getTime;
 
@@ -7864,7 +8241,8 @@ if (typeof window.Piwik !== 'object') {
                     apply(missedCalls[i]);
                 }
             }
-        };
+
+    };
 
         // Expose Piwik as an AMD module
         if (typeof define === 'function' && define.amd) {

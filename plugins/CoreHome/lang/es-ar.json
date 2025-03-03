@@ -106,6 +106,8 @@
         "StandardReport": "Informe estándar",
         "FlattenReport": "Aplanar informe",
         "ReportWithMetadata": "Informe con metadatos",
-        "SeeAvailableVersions": "Ver las versiones disponibles"
+        "ReadMoreOnlineGuide": "Leé más sobre este tema en la guía en línea.",
+        "SeeAvailableVersions": "Ver las versiones disponibles",
+        "QuickLinks": "Enlaces rápidos"
     }
 }

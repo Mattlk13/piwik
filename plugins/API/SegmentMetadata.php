@@ -21,7 +21,7 @@ class SegmentMetadata
      */
     private $categoryOrder = array();
 
-    public function getSegmentsMetadata($idSites = array(), $_hideImplementationData = true, $isAuthenticatedWithViewAccess)
+    public function getSegmentsMetadata($idSites = array(), $_hideImplementationData = true, $isAuthenticatedWithViewAccess, $_showAllSegments = false)
     {
         $segments = array();
 
@@ -46,6 +46,12 @@ class SegmentMetadata
 
         foreach (Dimension::getAllDimensions() as $dimension) {
             foreach ($dimension->getSegments() as $segment) {
+                if (!$_showAllSegments
+                    && $segment->isInternal()
+                ) {
+                    continue;
+                }
+
                 $segments[] = $segment;
             }
         }
@@ -87,6 +93,10 @@ class SegmentMetadata
                     && !is_string($segment['suggestedValuesCallback'])
                 ) {
                     unset($segment['suggestedValuesCallback']);
+                }
+
+                if (isset($segment['suggestedValuesApi'])) {
+                    unset($segment['suggestedValuesApi']);
                 }
             }
         }

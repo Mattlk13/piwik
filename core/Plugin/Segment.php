@@ -8,6 +8,7 @@
  */
 namespace Piwik\Plugin;
 use Exception;
+use Piwik\Development;
 
 /**
  * Creates a new segment that can be used for instance within the {@link \Piwik\Columns\Dimension::configureSegment()}
@@ -53,6 +54,8 @@ class Segment
     private $permission;
     private $suggestedValuesCallback;
     private $unionOfSegments;
+    private $isInternalSegment = false;
+    private $suggestedValuesApi = '';
 
     /**
      * If true, this segment will only be visible to the user if the user has view access
@@ -296,6 +299,32 @@ class Segment
     }
 
     /**
+     * @return string
+     * @ignore
+     */
+    public function getSuggestedValuesApi()
+    {
+        return $this->suggestedValuesApi;
+    }
+
+    /**
+     * Set callback which will be executed when user will call for suggested values for segment.
+     *
+     * @param string $suggestedValuesApi
+     */
+    public function setSuggestedValuesApi($suggestedValuesApi)
+    {
+        if (!empty($suggestedValuesApi) && is_string($suggestedValuesApi)) {
+            if (Development::isEnabled() && strpos($suggestedValuesApi, '.get') === false) {
+                throw new Exception('Invalid suggested values API defined, expecting ".get" to be present.');
+            }
+        } else {
+            $suggestedValuesApi = '';
+        }
+        $this->suggestedValuesApi = $suggestedValuesApi;
+    }
+
+    /**
      * You can restrict the access to this segment by passing a boolean `false`. For instance if you want to make
      * a certain segment only available to users having super user access you could do the following:
      * `$segment->setPermission(Piwik::hasUserSuperUserAccess());`
@@ -345,6 +374,10 @@ class Segment
             $segment['suggestedValuesCallback'] = $this->suggestedValuesCallback;
         }
 
+        if (is_string($this->suggestedValuesApi) && !empty($this->suggestedValuesApi)) {
+            $segment['suggestedValuesApi'] = $this->suggestedValuesApi;
+        }
+
         return $segment;
     }
 
@@ -371,6 +404,28 @@ class Segment
     public function setRequiresAtLeastViewAccess($requiresAtLeastViewAccess)
     {
         $this->requiresAtLeastViewAccess = $requiresAtLeastViewAccess;
+    }
+
+    /**
+     * Sets whether the segment is for internal use only and should not be visible in the UI or in API metadata output.
+     * These types of segments are, for example, used in unions for other segments, but have no value to users.
+     *
+     * @param bool $value
+     */
+    public function setIsInternal($value)
+    {
+        $this->isInternalSegment = $value;
+    }
+
+    /**
+     * Gets whether the segment is for internal use only and should not be visible in the UI or in API metadata output.
+     * These types of segments are, for example, used in unions for other segments, but have no value to users.
+     *
+     * @return bool
+     */
+    public function isInternal()
+    {
+        return $this->isInternalSegment;
     }
 
     private function check()
